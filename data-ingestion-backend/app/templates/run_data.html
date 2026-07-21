@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>{{ table_name }} 데이터</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<h1>{{ table_name }}</h1>
+<nav>
+  <a href="/runs/{{ run_id }}">run 상세로</a>
+  · <a href="/runs/{{ run_id }}/data/{{ table_name }}/download.csv">CSV 전체 다운로드</a>
+</nav>
+
+<p class="hint">총 {{ total }}행 · {{ page }}/{{ total_pages }} 페이지 (페이지당 {{ page_size }}행)</p>
+
+<div style="overflow-x: auto;">
+<table>
+<thead>
+<tr>
+{% if is_raw %}<th>#</th>{% endif %}
+{% for c in columns %}<th>{{ c.logical }}</th>{% endfor %}
+{% if is_raw %}<th>여분 컬럼(extra_columns)</th>{% endif %}
+</tr>
+</thead>
+<tbody>
+{% for r in rows %}
+<tr>
+  {% if is_raw %}<td>{{ r.source_row_number }}</td>{% endif %}
+  {% for c in columns %}<td>{{ r[c.physical] if r[c.physical] is not none else '' }}</td>{% endfor %}
+  {% if is_raw %}<td><pre>{{ r.extra_columns }}</pre></td>{% endif %}
+</tr>
+{% else %}
+<tr><td colspan="{{ columns|length + 2 }}">데이터 없음</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<nav>
+{% if page > 1 %}<a href="?page={{ page - 1 }}&page_size={{ page_size }}">← 이전</a>{% endif %}
+{% if page < total_pages %}<a href="?page={{ page + 1 }}&page_size={{ page_size }}">다음 →</a>{% endif %}
+</nav>
+</body>
+</html>

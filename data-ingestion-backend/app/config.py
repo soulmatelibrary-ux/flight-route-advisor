@@ -110,6 +110,7 @@ class Settings:
     workspace_root: Path
     max_upload_mb: int
     allowed_extensions: tuple[str, ...]
+    delete_token: str | None
 
     def __repr__(self) -> str:  # 자격증명 노출 방지(docs/06 §8)
         masked = _mask_database_url(self.database_url)
@@ -118,7 +119,8 @@ class Settings:
             f"source_project_root={self.source_project_root}, "
             f"upload_dir={self.upload_dir}, workspace_root={self.workspace_root}, "
             f"max_upload_mb={self.max_upload_mb}, "
-            f"allowed_extensions={self.allowed_extensions})"
+            f"allowed_extensions={self.allowed_extensions}, "
+            f"delete_token={'***' if self.delete_token else None})"
         )
 
 
@@ -148,6 +150,11 @@ def load_settings() -> Settings:
         allowed_extensions=_parse_allowed_extensions(
             _optional_env("ALLOWED_EXTENSIONS", ".csv,.xlsx,.xls")
         ),
+        # run 삭제(POST /runs/{id}/delete)는 되돌릴 수 없는 파괴적 작업인데 이 앱 전체에
+        # 인증이 없다(코드리뷰 2026-07-21 발견) — 별도 인증 체계를 새로 만드는 대신, 이
+        # 토큰이 설정된 경우에만 삭제 기능을 활성화하는 최소 게이트를 둔다(미설정 시
+        # 기본적으로 삭제 비활성화 — fail-closed, routers/runs.py 참고).
+        delete_token=_optional_env("INGESTION_DELETE_TOKEN", "") or None,
     )
 
 

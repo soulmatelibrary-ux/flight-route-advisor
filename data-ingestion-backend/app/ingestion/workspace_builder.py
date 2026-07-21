@@ -88,7 +88,7 @@ def build_workspace(
         subdir = _resolve_subdir(descriptor, subdir_template, uploaded, meta)
         dest_name = _resolve_filename(descriptor, uploaded, meta)
         needs_conversion = _needs_conversion(descriptor, uploaded.source_path.suffix)
-        _place_file(ws, subdir, dest_name, uploaded.source_path, needs_conversion)
+        _place_file(ws, subdir, dest_name, uploaded.source_path, needs_conversion, uploaded.original_filename)
 
     if descriptor.layout.needs_spatial:
         _copy_spatial_data(source_project_root, ws)
@@ -209,7 +209,11 @@ def _placement_suffix(descriptor: SkillDescriptor, original_suffix: str) -> str:
     CONVERT_TARGET_EXTENSION(.xlsx)으로 바뀐다 — 스킬 코드는 무수정이므로 파일 쪽을 맞춘다."""
     if _needs_conversion(descriptor, original_suffix):
         return CONVERT_TARGET_EXTENSION
-    return original_suffix
+    # 소문자로 통일한다 — 스킬의 glob(`*.xlsx` 등)은 소문자 리터럴이라, 원본 확장자가
+    # 대문자(예: `.XLSX`)면 케이스 센시티브 파일시스템(운영 대상 Linux)에서 스킬이 이
+    # 파일을 못 찾는다(코드리뷰 2026-07-21 발견 — macOS는 대소문자 무관이라 그동안
+    # 스모크 테스트로는 드러나지 않았다).
+    return original_suffix.lower()
 
 
 def _resolve_filename(descriptor: SkillDescriptor, uploaded: UploadedFile, meta: dict[str, str]) -> str:
@@ -237,25 +241,44 @@ def _resolve_filename(descriptor: SkillDescriptor, uploaded: UploadedFile, meta:
     return template.format(prefix=prefix, date=date, ext=ext)
 
 
-def _place_file(ws: Path, subdir: str, dest_name: str, source_path: Path, needs_conversion: bool) -> Path:
+def _place_file(
+    ws: Path, subdir: str, dest_name: str, source_path: Path, needs_conversion: bool, original_filename: str
+) -> Path:
     target_dir = ws / subdir
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / dest_name
     if target_path.exists():
         raise WorkspaceBuildError(f"동일 배치 대상 파일이 이미 존재함(파일명 충돌): {target_path}")
     if needs_conversion:
-        _convert_to_xlsx(source_path, target_path)
+        _convert_to_xlsx(source_path, target_path, original_filename)
     else:
         shutil.copy2(source_path, target_path)
     return target_path
 
 
-def _convert_to_xlsx(source_path: Path, target_path: Path) -> None:
+def _convert_to_xlsx(source_path: Path, target_path: Path, original_filename: str) -> None:
     """스킬이 직접 읽지 못하는 원본 포맷(.csv, .xls)을 스킬이 읽는 .xlsx 컨테이너로 옮겨
     담는다 — 헤더 위치·스킵행 등 어떤 구조 해석도 하지 않고 원본을 있는 그대로(셀 그리드)
     전사한다(각 스킬이 헤더 탐지/스킵 로직을 자체적으로 갖고 있어 — 예: 흐름관리일지의
     상위 N행 헤더 탐색 — 여기서 미리 구조를 해석해버리면 그 로직과 어긋난다).
     """
+    try:
+        _convert_to_xlsx_unsafe(source_path, target_path)
+    except WorkspaceBuildError:
+        raise
+    except Exception as exc:
+        # 인코딩이 다른 CSV(EUC-KR/CP949 등 — 실제로 utf-8-sig가 아닐 수 있음)나 손상된
+        # .xls는 pandas/xlrd가 다양한 예외(UnicodeDecodeError/XLRDError 등)를 던진다.
+        # 그대로 두면 routers/upload.py는 WorkspaceBuildError만 잡으므로 처리되지 않은
+        # 500 + 서버 임시경로 노출로 이어진다(코드리뷰 2026-07-21 발견, load_raw의
+        # IntegrityError 건과 같은 부류). 사용자 노출용 메시지에는 원본 예외 텍스트를
+        # 담지 않는다(내부 경로/라이브러리 상세가 섞여 나올 수 있음).
+        raise WorkspaceBuildError(
+            f"파일을 변환할 수 없음(인코딩/형식 확인 필요): {original_filename!r}"
+        ) from exc
+
+
+def _convert_to_xlsx_unsafe(source_path: Path, target_path: Path) -> None:
     suffix = source_path.suffix.lower()
     if suffix == ".csv":
         # CSV는 시트 개념이 없다 — 스킬 일부(예: flow_management)는 원본 시트명을 그대로

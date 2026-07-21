@@ -17,9 +17,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import logging
+
 import pandas as pd
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS
@@ -44,6 +47,8 @@ from app.ingestion.workspace_builder import UploadedFile
 # raw/processed 문자열 셀은 원본 충실도 우선 — 빈 문자열만 결측으로 취급하고, 그 외 pandas
 # 기본 NA 토큰("NA","N/A" 등)은 문자 그대로 보존한다(docs/06-conventions.md §7 원본 충실도 계승).
 _READ_CSV_KW = {"dtype": "string", "keep_default_na": False, "na_values": [""]}
+
+logger = logging.getLogger(__name__)
 
 
 class LoaderError(RuntimeError):
@@ -152,20 +157,31 @@ def load_raw(
             stored_relpath = _archive_upload(uploaded, raw_file_id)
             sha256 = _sha256_of(uploaded.source_path)
 
-            conn.execute(
-                insert(raw_files),
-                [
-                    {
-                        "id": raw_file_id,
-                        "file_type": slot.file_type,
-                        "original_filename": uploaded.original_filename,
-                        "stored_relpath": stored_relpath,
-                        "sha256": sha256,
-                        "sheet_name": None,
-                        "row_count": len(df),
-                    }
-                ],
-            )
+            try:
+                conn.execute(
+                    insert(raw_files),
+                    [
+                        {
+                            "id": raw_file_id,
+                            "file_type": slot.file_type,
+                            "original_filename": uploaded.original_filename,
+                            "stored_relpath": stored_relpath,
+                            "sha256": sha256,
+                            "sheet_name": None,
+                            "row_count": len(df),
+                        }
+                    ],
+                )
+            except IntegrityError as exc:
+                # uq_raw_files_sha256_type_sheet 위반 — 동일 내용 파일이 이미 적재됨(재시도
+                # 시나리오 포함). 그대로 두면 IntegrityError가 여기서 새어나가 upload.py의
+                # `except LoaderError`에 걸리지 않고 처리되지 않은 500 + run이 QUEUED에
+                # 영구 정지한다(코드리뷰 2026-07-21 발견). LoaderError로 통일해 정상 FAILED
+                # 전이 경로를 타게 한다.
+                raise LoaderError(
+                    f"{descriptor.run_type}: 이미 동일한 내용의 파일이 적재됨(중복): "
+                    f"{uploaded.original_filename!r}"
+                ) from exc
             conn.execute(
                 insert(ingestion_run_files),
                 [{"run_id": run_id, "raw_file_id": raw_file_id, "role": "input"}],
@@ -211,8 +227,15 @@ def _read_raw_dataframe(descriptor: SkillDescriptor, slot: UploadSlot, uploaded:
     except LoaderError:
         raise
     except Exception as exc:  # pandas/openpyxl이 던지는 다양한 예외를 일관된 타입으로 통일
+        # pandas/openpyxl 원본 예외 메시지에는 서버 내부 임시경로가 포함될 수 있어(코드리뷰
+        # 2026-07-21 발견) 클라이언트로 나가는 메시지에는 담지 않는다. 상세는 서버 로그에만
+        # 남긴다(오류 응답 내부정보 비노출, docs/06-conventions.md §8).
+        logger.exception(
+            "%s: 원본 파일 파싱 실패: %s", descriptor.run_type, uploaded.original_filename
+        )
         raise LoaderError(
-            f"{descriptor.run_type}: 원본 파일 파싱 실패: {uploaded.original_filename!r} ({exc})"
+            f"{descriptor.run_type}: 원본 파일 파싱 실패(형식 확인 필요, 상세는 서버 로그 참조): "
+            f"{uploaded.original_filename!r}"
         ) from exc
 
 
@@ -228,6 +251,15 @@ def _read_raw_dataframe_unsafe(descriptor: SkillDescriptor, slot: UploadSlot, up
         return pd.read_excel(uploaded.source_path, **_READ_CSV_KW)
 
     if descriptor.run_type == "fois":
+        # 알려진 한계(코드리뷰 2026-07-21): xlsx 원본은 맨 위에 버려지는 행이 있어
+        # skiprows=1로 위치 기반으로 건너뛴다(FOIS_SOURCE_COLUMNS 컬럼 순서 계약, 헤더
+        # 텍스트가 "지연시간" 중복이라 이름으로는 구분 불가). 이 CSV 분기는 "독립적으로
+        # 만들어진 FOIS CSV도 xlsx와 동일하게 맨 위에 버려지는 행이 있다"고 가정한다 —
+        # 실제 그런 CSV 원본이 없어 검증하지 못했다. 만약 그 행이 없는 CSV가 들어오면
+        # skiprows=1이 진짜 첫 데이터 행을 조용히 삼켜버리고, 열 수는 우연히 17개로
+        # 맞아 아래 검증도 통과할 수 있다(행 수만 1 적어짐) — 이 계약이 실제 운영에서
+        # 깨지면 열 수 검증이 아니라 값 기반 검증(예: 첫 행이 실제 편명/일자 패턴인지)을
+        # 추가해야 한다.
         if suffix == ".csv":
             df = pd.read_csv(uploaded.source_path, header=None, skiprows=1, encoding="utf-8-sig", **_READ_CSV_KW)
         else:
@@ -281,7 +313,8 @@ def _read_flow_management_raw(path: Path) -> pd.DataFrame:
 def _read_flow_management_raw_csv(path: Path) -> pd.DataFrame:
     # CSV는 시트 개념이 없으므로 파일 전체를 단일 시트처럼 취급해 동일한 헤더 탐지 규칙을 쓴다.
     preview = pd.read_csv(
-        path, header=None, nrows=FLOW_MANAGEMENT_HEADER_SCAN_ROWS, dtype=str, encoding="utf-8-sig"
+        path, header=None, nrows=FLOW_MANAGEMENT_HEADER_SCAN_ROWS, dtype=str,
+        keep_default_na=False, encoding="utf-8-sig"
     )
     header_row = _find_flow_management_header_row(preview)
     if header_row is None:
@@ -405,12 +438,92 @@ def load_processed(
     return loaded
 
 
+# --- run 삭제(삭제 후 재입력 루틴) ---
+
+_DELETABLE_STATUSES = ("SUCCESS", "VALIDATION_FAILED", "FAILED")
+
+
+def delete_run(engine: Engine, run_id: uuid.UUID, deleted_by: str) -> dict[str, int]:
+    """이 run이 적재한 raw_*_rows/processed_*/아카이브 파일을 지우고 run을 'DELETED'로
+    표시한다(감사 기록으로 남김 — ingestion_runs/ingestion_logs/raw_files 메타데이터 행
+    자체는 지우지 않는다, run 물리 삭제 아님). 반환: 테이블별 삭제 행수.
+
+    같은 날짜/파일을 다시 처리하고 싶을 때(사용자 요청 "삭제 후 재입력") 이 함수로 이전
+    run의 데이터를 비운 뒤 업로드 폼으로 정상 재업로드하면 새 run_id가 생성된다 — 자동으로
+    "같은 날짜면 덮어쓴다"는 정책은 두지 않는다(Stage 1의 최신 run 선택 정책이 아직
+    미확정이라 append-only 원칙과 충돌 소지가 있다, docs/02-db-integration.md §3). 대신
+    운영자가 명시적으로 지울 run을 고르는 이 루틴만 제공한다.
+    """
+    with engine.begin() as conn:
+        run = conn.execute(
+            select(ingestion_runs.c.status, ingestion_runs.c.workspace_path)
+            .where(ingestion_runs.c.id == run_id)
+            .with_for_update()
+        ).mappings().first()
+        if run is None:
+            raise LoaderError(f"run을 찾을 수 없음: {run_id}")
+        if run["status"] not in _DELETABLE_STATUSES:
+            raise LoaderError(
+                f"이 상태의 run은 삭제할 수 없음: {run['status']!r} "
+                f"(삭제 가능: {_DELETABLE_STATUSES})"
+            )
+
+        raw_file_rows = conn.execute(
+            select(raw_files.c.id, raw_files.c.stored_relpath)
+            .select_from(ingestion_run_files.join(raw_files, ingestion_run_files.c.raw_file_id == raw_files.c.id))
+            .where(ingestion_run_files.c.run_id == run_id)
+        ).all()
+
+        deleted: dict[str, int] = {}
+        for table_name, table in {**RAW_ROW_TABLES, **PROCESSED_TABLES}.items():
+            result = conn.execute(delete(table).where(table.c.run_id == run_id))
+            if result.rowcount:
+                deleted[table_name] = result.rowcount
+
+        conn.execute(delete(ingestion_run_files).where(ingestion_run_files.c.run_id == run_id))
+        raw_file_ids = [r.id for r in raw_file_rows]
+        if raw_file_ids:
+            conn.execute(delete(raw_files).where(raw_files.c.id.in_(raw_file_ids)))
+
+        conn.execute(
+            update(ingestion_runs)
+            .where(ingestion_runs.c.id == run_id)
+            .values(status="DELETED", deleted_at=datetime.now(timezone.utc), deleted_by=deleted_by)
+        )
+
+    _cleanup_run_files(raw_file_rows, run["workspace_path"])
+    return deleted
+
+
+def _cleanup_run_files(raw_file_rows, workspace_path: str | None) -> None:
+    """DB 트랜잭션 커밋 후 실제 디스크 파일을 정리한다(best-effort — 파일 정리가
+    실패해도 이미 커밋된 삭제 자체를 되돌리지 않는다, 실패는 서버 로그에만 남긴다).
+    """
+    for row in raw_file_rows:
+        blob_path = settings.upload_dir / row.stored_relpath
+        try:
+            blob_path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("삭제된 run의 아카이브 파일 정리 실패: %s", blob_path)
+
+    if workspace_path:
+        try:
+            shutil.rmtree(Path(workspace_path), ignore_errors=True)
+        except OSError:
+            logger.exception("삭제된 run의 workspace 정리 실패: %s", workspace_path)
+
+
 def _load_processed_one(conn: Connection, table_name: str, path: Path, run_id: uuid.UUID) -> int:
     pairs = PROCESSED_COLUMNS[table_name]
     try:
         df = pd.read_csv(path, encoding="utf-8-sig", **_READ_CSV_KW)
     except Exception as exc:
-        raise LoaderError(f"{table_name}: 산출 CSV 파싱 실패: {path} ({exc})") from exc
+        # 원본 pandas 예외 텍스트는 클라이언트에 노출하지 않는다(코드리뷰 2026-07-21 발견 —
+        # _read_raw_dataframe에 이미 적용한 것과 동일한 원칙, docs/06-conventions.md §8).
+        logger.exception("%s: 산출 CSV 파싱 실패: %s", table_name, path)
+        raise LoaderError(
+            f"{table_name}: 산출 CSV 파싱 실패(형식 확인 필요, 상세는 서버 로그 참조): {path}"
+        ) from exc
 
     expected_logicals = [logical for logical, _ in pairs]
     missing = [logical for logical in expected_logicals if logical not in df.columns]

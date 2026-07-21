@@ -18,7 +18,7 @@ from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS
 metadata = sa.MetaData()
 
 _RUN_TYPES = ("flight_data", "acdm", "fois", "flow_management")
-_RUN_STATUSES = ("QUEUED", "RUNNING", "SUCCESS", "VALIDATION_FAILED", "FAILED")
+_RUN_STATUSES = ("QUEUED", "RUNNING", "SUCCESS", "VALIDATION_FAILED", "FAILED", "DELETED")
 _RAW_FILE_TYPES = (
     "flight_analysis",
     "flight_search",
@@ -53,12 +53,16 @@ ingestion_runs = sa.Table(
     sa.Column("output_paths", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
     sa.Column("validation_summary", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
     sa.Column("error_message", sa.Text),
+    # 삭제(재입력 전 정리) 시에만 채워진다 — run 자체를 물리 삭제하지 않고 감사 기록으로
+    # 남긴다(status='DELETED', loaders.delete_run). 데이터/아카이브 파일만 실제로 지운다.
+    sa.Column("deleted_at", sa.TIMESTAMP(timezone=True)),
+    sa.Column("deleted_by", sa.Text),
     sa.CheckConstraint(
         "run_type IN ('flight_data','acdm','fois','flow_management')",
         name="ck_ingestion_runs_run_type",
     ),
     sa.CheckConstraint(
-        "status IN ('QUEUED','RUNNING','SUCCESS','VALIDATION_FAILED','FAILED')",
+        "status IN ('QUEUED','RUNNING','SUCCESS','VALIDATION_FAILED','FAILED','DELETED')",
         name="ck_ingestion_runs_status",
     ),
 )

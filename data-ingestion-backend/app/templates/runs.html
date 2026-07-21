@@ -8,6 +8,9 @@
 <body>
 <h1>처리 로그</h1>
 <nav><a href="/">업로드로 돌아가기</a></nav>
+{% if runs|length >= run_list_limit %}
+<p>최근 {{ run_list_limit }}건만 표시됩니다.</p>
+{% endif %}
 
 <table>
 <thead>
