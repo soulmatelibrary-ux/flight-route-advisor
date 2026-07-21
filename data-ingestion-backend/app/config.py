@@ -29,7 +29,7 @@ if load_dotenv is not None:
     else:
         load_dotenv()
 
-_ALLOWED_EXTENSIONS_WHITELIST = (".csv", ".xlsx")
+_ALLOWED_EXTENSIONS_WHITELIST = (".csv", ".xlsx", ".xls")
 
 
 class ConfigError(RuntimeError):
@@ -146,7 +146,7 @@ def load_settings() -> Settings:
             "MAX_UPLOAD_MB", _optional_env("MAX_UPLOAD_MB", "200")
         ),
         allowed_extensions=_parse_allowed_extensions(
-            _optional_env("ALLOWED_EXTENSIONS", ".csv,.xlsx")
+            _optional_env("ALLOWED_EXTENSIONS", ".csv,.xlsx,.xls")
         ),
     )
 

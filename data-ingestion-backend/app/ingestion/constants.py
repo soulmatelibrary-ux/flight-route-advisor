@@ -35,14 +35,30 @@ SOURCE_SUBDIR = {
 }
 
 # 허용 업로드 확장자(스킬별 계약, config.Settings.allowed_extensions와 별개로 스킬 입력 자체의 제약)
-ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".xlsx")
+ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".xlsx", ".xls")
 
 # Excel 임시파일 접두사(스킬연동_레퍼런스 §3.1) — workspace 배치 시 제외
 EXCEL_TEMP_PREFIX = "~$"
 
-# 파일명 날짜 정규식 (언더스코어 구분자, 비행자료 전용 — §3.1)
-FLIGHT_ANALYSIS_FILENAME_RE = re.compile(r"^비행자료분석_(\d{8})\.xlsx$", re.IGNORECASE)
-FLIGHT_SEARCH_FILENAME_RE = re.compile(r"^비행자료검색_(\d{8})\.xlsx$", re.IGNORECASE)
+# run_type별로 "스킬 스크립트가 직접(변환 없이) 읽을 수 있는" 확장자(스킬 코드의 실제
+# glob/suffix 필터 그대로 — preprocess_flight_data.py/run_fois_preprocessing.py/
+# run_flow_management_preprocessing.py는 `*.xlsx`만 훑고, merge_acdm_data.py만 `.csv`/`.xlsx`
+# 둘 다 훑는다). 이 목록에 없는 업로드 확장자(.xls, 그리고 flight_data/fois/flow_management의
+# .csv)는 workspace 배치 시 CONVERT_TARGET_EXTENSION으로 변환한 뒤 배치한다 — 스킬 코드는
+# 무수정 원칙이라 스킬이 이해하는 확장자로 파일 쪽을 맞춘다(workspace_builder._convert_to_xlsx).
+SKILL_NATIVE_EXTENSIONS: dict[str, tuple[str, ...]] = {
+    "flight_data": (".xlsx",),
+    "acdm": (".csv", ".xlsx"),
+    "fois": (".xlsx",),
+    "flow_management": (".xlsx",),
+}
+CONVERT_TARGET_EXTENSION = ".xlsx"
+
+# 파일명 날짜 정규식 (언더스코어 구분자, 비행자료 전용 — §3.1). 확장자는 업로드 허용 포맷
+# 전부(xlsx/xls/csv) 매칭한다 — 실제 워크스페이스 배치 파일명은 스킬 정규식(§3.1, `.xlsx`
+# 고정)에 맞춰 항상 재구성되므로(workspace_builder._resolve_filename) 여기서는 날짜만 추출한다.
+FLIGHT_ANALYSIS_FILENAME_RE = re.compile(r"^비행자료분석_(\d{8})\.(?:xlsx|xls|csv)$", re.IGNORECASE)
+FLIGHT_SEARCH_FILENAME_RE = re.compile(r"^비행자료검색_(\d{8})\.(?:xlsx|xls|csv)$", re.IGNORECASE)
 
 # ACDM 파일 stem 끝 8자리 날짜(§3.2)
 ACDM_DATE_SUFFIX_RE = re.compile(r"(\d{8})$")

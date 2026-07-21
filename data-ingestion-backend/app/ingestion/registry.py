@@ -77,11 +77,11 @@ FLIGHT_DATA = SkillDescriptor(
     extra_args=(),
     upload_slots=(
         UploadSlot(
-            "analysis", required=True, accept=(".xlsx",),
+            "analysis", required=True, accept=(".xlsx", ".xls", ".csv"),
             file_type="flight_analysis", raw_table="raw_flight_analysis_rows", paired=True,
         ),
         UploadSlot(
-            "search", required=True, accept=(".xlsx",),
+            "search", required=True, accept=(".xlsx", ".xls", ".csv"),
             file_type="flight_search", raw_table="raw_flight_search_rows", paired=True,
         ),
     ),
@@ -114,11 +114,11 @@ ACDM = SkillDescriptor(
     # (UploadedFile.airport_ko로 파일별 재정의, 미지정 시 meta의 공통 airport_ko 사용).
     upload_slots=(
         UploadSlot(
-            "departure_file", required=True, accept=(".csv", ".xlsx"),
+            "departure_file", required=True, accept=(".csv", ".xlsx", ".xls"),
             file_type="acdm_departure", raw_table="raw_acdm_departure_rows",
         ),
         UploadSlot(
-            "arrival_file", required=True, accept=(".csv", ".xlsx"),
+            "arrival_file", required=True, accept=(".csv", ".xlsx", ".xls"),
             file_type="acdm_arrival", raw_table="raw_acdm_arrival_rows",
         ),
     ),
@@ -152,11 +152,11 @@ FOIS = SkillDescriptor(
     # 한쪽이라도 xlsx가 없으면 FileNotFoundError를 낸다(수동 검증으로 확인) — 두 슬롯 모두 필수다.
     upload_slots=(
         UploadSlot(
-            "departure", required=True, accept=(".xlsx",),
+            "departure", required=True, accept=(".xlsx", ".xls", ".csv"),
             file_type="fois_departure", raw_table="raw_fois_departure_rows",
         ),
         UploadSlot(
-            "arrival", required=True, accept=(".xlsx",),
+            "arrival", required=True, accept=(".xlsx", ".xls", ".csv"),
             file_type="fois_arrival", raw_table="raw_fois_arrival_rows",
         ),
     ),
@@ -188,7 +188,7 @@ FLOW_MANAGEMENT = SkillDescriptor(
     extra_args=("--no-integrate",),
     upload_slots=(
         UploadSlot(
-            "file", required=True, accept=(".xlsx",),
+            "file", required=True, accept=(".xlsx", ".xls", ".csv"),
             file_type="flow_management", raw_table="raw_flow_management_rows",
         ),
     ),

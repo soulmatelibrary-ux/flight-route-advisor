@@ -6,19 +6,24 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+import pandas as pd
+
 from app.ingestion.constants import (
     ACDM_DATE_SUFFIX_RE,
     AIRPORT_KO_TO_ICAO,
+    CONVERT_TARGET_EXTENSION,
     DATE_YYYYMMDD_RE,
     FLIGHT_ANALYSIS_FILENAME_RE,
     FLIGHT_SEARCH_FILENAME_RE,
     PATH_INJECTION_RE,
+    SKILL_NATIVE_EXTENSIONS,
     SOURCE_SUBDIR,
 )
 from app.ingestion.registry import SkillDescriptor
@@ -82,7 +87,8 @@ def build_workspace(
         subdir_template = descriptor.layout.slot_subdirs[uploaded.slot_key]
         subdir = _resolve_subdir(descriptor, subdir_template, uploaded, meta)
         dest_name = _resolve_filename(descriptor, uploaded, meta)
-        _place_file(ws, subdir, dest_name, uploaded.source_path)
+        needs_conversion = _needs_conversion(descriptor, uploaded.source_path.suffix)
+        _place_file(ws, subdir, dest_name, uploaded.source_path, needs_conversion)
 
     if descriptor.layout.needs_spatial:
         _copy_spatial_data(source_project_root, ws)
@@ -192,20 +198,36 @@ def _file_date(descriptor: SkillDescriptor, uploaded: UploadedFile, meta: dict[s
     raise WorkspaceBuildError(f"{descriptor.run_type}는 파일별 날짜 개념이 없음")
 
 
+def _needs_conversion(descriptor: SkillDescriptor, original_suffix: str) -> bool:
+    """스킬이 이 확장자를 직접 읽지 못하면 True(배치 시 CONVERT_TARGET_EXTENSION으로 변환 필요)."""
+    return original_suffix.lower() not in SKILL_NATIVE_EXTENSIONS[descriptor.run_type]
+
+
+def _placement_suffix(descriptor: SkillDescriptor, original_suffix: str) -> str:
+    """워크스페이스에 실제로 배치될 파일의 확장자. 스킬이 원본 확장자를 못 읽으면
+    (예: flight_data/fois/flow_management에 올린 .csv/.xls, ACDM에 올린 .xls)
+    CONVERT_TARGET_EXTENSION(.xlsx)으로 바뀐다 — 스킬 코드는 무수정이므로 파일 쪽을 맞춘다."""
+    if _needs_conversion(descriptor, original_suffix):
+        return CONVERT_TARGET_EXTENSION
+    return original_suffix
+
+
 def _resolve_filename(descriptor: SkillDescriptor, uploaded: UploadedFile, meta: dict[str, str]) -> str:
     template = descriptor.layout.filename_template
-    ext = Path(uploaded.original_filename).suffix
+    ext = _placement_suffix(descriptor, Path(uploaded.original_filename).suffix)
 
     if template is None:
         # ACDM: 파일명 끝에 이미 8자리 날짜가 있으면 그대로, 없으면 재구성한 날짜로 재명명한다
-        # (스킬연동_레퍼런스 §3.2 — 파일명 끝 8자리 날짜 필수). 다른 run_type은 원본 파일명 유지.
+        # (스킬연동_레퍼런스 §3.2 — 파일명 끝 8자리 날짜 필수). 다른 run_type은 원본 파일명 유지
+        # (단, 변환 대상이면 확장자만 배치용으로 바꾼다).
         if descriptor.run_type == "acdm":
             stem = Path(uploaded.original_filename).stem
             if ACDM_DATE_SUFFIX_RE.search(stem):
-                return uploaded.original_filename
+                return f"{stem}{ext}"
             date = _file_date(descriptor, uploaded, meta)
             return f"{stem}_{date}{ext}"
-        return uploaded.original_filename
+        stem = Path(uploaded.original_filename).stem
+        return f"{stem}{ext}"
 
     # flight_data: 파일명에서 파싱한 실제 날짜를 쓴다(전역 meta 날짜를 쓰면 여러 날짜를 한 번에
     # 올릴 때 모든 파일이 같은 이름으로 겹쳐써진다).
@@ -215,14 +237,49 @@ def _resolve_filename(descriptor: SkillDescriptor, uploaded: UploadedFile, meta:
     return template.format(prefix=prefix, date=date, ext=ext)
 
 
-def _place_file(ws: Path, subdir: str, dest_name: str, source_path: Path) -> Path:
+def _place_file(ws: Path, subdir: str, dest_name: str, source_path: Path, needs_conversion: bool) -> Path:
     target_dir = ws / subdir
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / dest_name
     if target_path.exists():
         raise WorkspaceBuildError(f"동일 배치 대상 파일이 이미 존재함(파일명 충돌): {target_path}")
-    shutil.copy2(source_path, target_path)
+    if needs_conversion:
+        _convert_to_xlsx(source_path, target_path)
+    else:
+        shutil.copy2(source_path, target_path)
     return target_path
+
+
+def _convert_to_xlsx(source_path: Path, target_path: Path) -> None:
+    """스킬이 직접 읽지 못하는 원본 포맷(.csv, .xls)을 스킬이 읽는 .xlsx 컨테이너로 옮겨
+    담는다 — 헤더 위치·스킵행 등 어떤 구조 해석도 하지 않고 원본을 있는 그대로(셀 그리드)
+    전사한다(각 스킬이 헤더 탐지/스킵 로직을 자체적으로 갖고 있어 — 예: 흐름관리일지의
+    상위 N행 헤더 탐색 — 여기서 미리 구조를 해석해버리면 그 로직과 어긋난다).
+    """
+    suffix = source_path.suffix.lower()
+    if suffix == ".csv":
+        # CSV는 시트 개념이 없다 — 스킬 일부(예: flow_management)는 원본 시트명을 그대로
+        # 산출물의 "원본시트" 컬럼에 기록하므로, pandas 기본값("Sheet1")처럼 근거 없는 이름
+        # 대신 원본 파일명에서 유도한 이름을 써서 "이 값은 CSV 출처"임을 추적 가능하게 한다.
+        grid = pd.read_csv(source_path, header=None, dtype=str, keep_default_na=False, encoding="utf-8-sig")
+        grid.to_excel(target_path, sheet_name=_csv_sheet_name(source_path), header=False, index=False, engine="openpyxl")
+        return
+    if suffix == ".xls":
+        with pd.ExcelFile(source_path, engine="xlrd") as xls, pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+            for sheet in xls.sheet_names:
+                grid = pd.read_excel(xls, sheet_name=sheet, header=None, dtype=str)
+                grid.to_excel(writer, sheet_name=sheet, header=False, index=False)
+        return
+    raise WorkspaceBuildError(f"변환할 수 없는 업로드 확장자: {suffix!r}")
+
+
+_EXCEL_SHEET_NAME_FORBIDDEN_RE = re.compile(r"[:\\/?*\[\]]")
+
+
+def _csv_sheet_name(source_path: Path) -> str:
+    """엑셀 시트명 제약(최대 31자, `: \\ / ? * [ ]` 금지)을 지켜 원본 파일 stem에서 유도한다."""
+    sanitized = _EXCEL_SHEET_NAME_FORBIDDEN_RE.sub("_", source_path.stem).strip() or "CSV"
+    return sanitized[:31]
 
 
 def _copy_spatial_data(source_project_root: Path, ws: Path) -> None:

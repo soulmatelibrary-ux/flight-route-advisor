@@ -13,3 +13,8 @@ python-dotenv==1.0.1
 pandas==2.3.3
 openpyxl==3.1.5
 shapely==2.1.2
+
+# --- 이 백엔드 자체의 업로드 포맷 확장(.xls 지원, 스킬 자체는 요구하지 않음) ---
+# 스킬은 .xlsx/.csv만 읽으므로(무수정), .xls 업로드는 workspace_builder가 .xlsx로 변환해
+# 배치한다 — xlrd는 그 변환 단계(및 raw 계층 원본 재읽기)에서만 쓰인다.
+xlrd==2.0.1

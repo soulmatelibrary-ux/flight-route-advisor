@@ -217,11 +217,21 @@ def _read_raw_dataframe(descriptor: SkillDescriptor, slot: UploadSlot, uploaded:
 
 
 def _read_raw_dataframe_unsafe(descriptor: SkillDescriptor, slot: UploadSlot, uploaded: UploadedFile) -> pd.DataFrame:
+    # 원본 파일(사용자가 실제로 올린 그대로의 포맷)을 읽는다 — 워크스페이스 배치용으로
+    # 변환한 사본이 아니라 항상 `uploaded.source_path`(원본)를 읽어야 raw 계층 원본 충실도가
+    # 유지된다(변환은 스킬 입력용일 뿐, DB 적재는 원본 기준).
+    suffix = uploaded.source_path.suffix.lower()
+
     if descriptor.run_type == "flight_data":
+        if suffix == ".csv":
+            return pd.read_csv(uploaded.source_path, encoding="utf-8-sig", **_READ_CSV_KW)
         return pd.read_excel(uploaded.source_path, **_READ_CSV_KW)
 
     if descriptor.run_type == "fois":
-        df = pd.read_excel(uploaded.source_path, header=None, skiprows=1, **_READ_CSV_KW)
+        if suffix == ".csv":
+            df = pd.read_csv(uploaded.source_path, header=None, skiprows=1, encoding="utf-8-sig", **_READ_CSV_KW)
+        else:
+            df = pd.read_excel(uploaded.source_path, header=None, skiprows=1, **_READ_CSV_KW)
         if df.shape[1] != len(FOIS_SOURCE_COLUMNS):
             raise LoaderError(
                 f"FOIS 원본 열 수가 {len(FOIS_SOURCE_COLUMNS)}개가 아님: {uploaded.original_filename!r} "
@@ -231,37 +241,52 @@ def _read_raw_dataframe_unsafe(descriptor: SkillDescriptor, slot: UploadSlot, up
         return df
 
     if descriptor.run_type == "flow_management":
+        if suffix == ".csv":
+            return _read_flow_management_raw_csv(uploaded.source_path)
         return _read_flow_management_raw(uploaded.source_path)
 
     if descriptor.run_type == "acdm":
-        suffix = uploaded.source_path.suffix.lower()
         if suffix == ".csv":
             # 실측 샘플은 UTF-8이지만, utf-8-sig로 읽으면 BOM 유무와 무관하게 안전하다.
             return pd.read_csv(uploaded.source_path, encoding="utf-8-sig", **_READ_CSV_KW)
-        return pd.read_excel(uploaded.source_path, **_READ_CSV_KW)
+        return pd.read_excel(uploaded.source_path, **_READ_CSV_KW)  # .xlsx/.xls(엔진 자동 선택)
 
     raise LoaderError(f"알 수 없는 run_type: {descriptor.run_type!r}")
 
 
-def _read_flow_management_raw(path: Path) -> pd.DataFrame:
-    # run_flow_management_preprocessing.py의 locate_header()와 동일 규칙: 시트별 상위
+def _find_flow_management_header_row(preview: pd.DataFrame) -> int | None:
+    # run_flow_management_preprocessing.py의 locate_header()와 동일 규칙: 상위
     # FLOW_MANAGEMENT_HEADER_SCAN_ROWS행 내에서 필수 토큰이 모두 있는 행을 헤더로 삼는다.
-    xls = pd.ExcelFile(path)
+    for row_idx in range(len(preview)):
+        values = {str(v).strip() for v in preview.iloc[row_idx].tolist()}
+        if FLOW_MANAGEMENT_HEADER_TOKENS.issubset(values):
+            return row_idx
+    return None
+
+
+def _read_flow_management_raw(path: Path) -> pd.DataFrame:
+    xls = pd.ExcelFile(path)  # .xlsx/.xls 모두 확장자로 엔진 자동 선택(openpyxl/xlrd)
     frames = []
     for sheet in xls.sheet_names:
         preview = pd.read_excel(
             xls, sheet_name=sheet, header=None, nrows=FLOW_MANAGEMENT_HEADER_SCAN_ROWS
         )
-        header_row = None
-        for row_idx in range(len(preview)):
-            values = {str(v).strip() for v in preview.iloc[row_idx].tolist()}
-            if FLOW_MANAGEMENT_HEADER_TOKENS.issubset(values):
-                header_row = row_idx
-                break
+        header_row = _find_flow_management_header_row(preview)
         if header_row is None:
             raise LoaderError(f"흐름관리일지 헤더를 찾지 못함: {path.name} 시트 {sheet!r}")
         frames.append(pd.read_excel(xls, sheet_name=sheet, header=header_row, **_READ_CSV_KW))
     return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+
+def _read_flow_management_raw_csv(path: Path) -> pd.DataFrame:
+    # CSV는 시트 개념이 없으므로 파일 전체를 단일 시트처럼 취급해 동일한 헤더 탐지 규칙을 쓴다.
+    preview = pd.read_csv(
+        path, header=None, nrows=FLOW_MANAGEMENT_HEADER_SCAN_ROWS, dtype=str, encoding="utf-8-sig"
+    )
+    header_row = _find_flow_management_header_row(preview)
+    if header_row is None:
+        raise LoaderError(f"흐름관리일지 헤더를 찾지 못함(csv): {path.name}")
+    return pd.read_csv(path, header=header_row, encoding="utf-8-sig", **_READ_CSV_KW)
 
 
 def _build_raw_records(
