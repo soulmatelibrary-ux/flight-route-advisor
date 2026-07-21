@@ -1,0 +1,23 @@
+{
+  "apiBaseUrl": "/api",
+  "weatherProxyUrl": "http://localhost:3000/proxy",
+  "tileUrl": null,
+  "map": {
+    "center": [30, 127],
+    "zoom": 3,
+    "minZoom": 2,
+    "maxBounds": [[-78, -400], [85, 400]]
+  },
+  "display": {
+    "waypointLimit": 800,
+    "labelZoom": { "airway": 7, "fix": 7, "airportICAO": 8 }
+  },
+  "tokens": {
+    "ink": "#22303c",
+    "inkSoft": "#7a8a99",
+    "paper": "#fbfbf9",
+    "orange": "#e8590c",
+    "blue": "#1d5fae"
+  },
+  "externalApis": {}
+}

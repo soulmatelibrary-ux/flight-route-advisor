@@ -1,0 +1,25 @@
+# 자격증명·환경설정 (docs/06-conventions.md §1 — .env.example만 커밋)
+.env
+.env.*
+!.env.example
+
+# 참조 지오메트리 빌드 산출물(빌드 시 재생성)
+backend/app/reference/artifacts/
+
+# 회귀 비교 정답지(15MB, docs/06-conventions.md §7 — Read 금지 대상이자 커밋 금지)
+완성본_전세계_항공로_지도.html
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Stage 0 적재 볼륨(원본 아카이브·run별 workspace) — docs/06-conventions.md §1 하드코딩 금지 대상 아님, 단 대용량/생성물
+data-ingestion-backend/data/
+
+# Node (weather 서비스는 외부 PORTING_PACKAGE_ROOT 소유, 여기 node_modules는 생성되지 않지만 방어적으로)
+node_modules/
+
+# OS
+.DS_Store

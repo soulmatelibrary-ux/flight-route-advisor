@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>처리 로그</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<h1>처리 로그</h1>
+<nav><a href="/">업로드로 돌아가기</a></nav>
+
+<table>
+<thead>
+<tr><th>run_id</th><th>유형</th><th>상태</th><th>시작</th><th>종료</th></tr>
+</thead>
+<tbody>
+{% for r in runs %}
+<tr>
+  <td><a href="/runs/{{ r.id }}">{{ r.id }}</a></td>
+  <td>{{ r.run_type }}</td>
+  <td><span class="badge badge-{{ r.status|lower }}">{{ r.status }}</span></td>
+  <td>{{ r.started_at or '-' }}</td>
+  <td>{{ r.finished_at or '-' }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5">아직 처리된 run이 없습니다.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</body>
+</html>

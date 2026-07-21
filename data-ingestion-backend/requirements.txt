@@ -1,0 +1,15 @@
+# 버전 고정 근거: data-ingestion-backend/docs/기술스택_결정.md §6
+# --- 백엔드 ---
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+jinja2==3.1.4
+python-multipart==0.0.19
+sqlalchemy==2.0.36
+alembic==1.14.0
+psycopg2-binary==2.9.10
+python-dotenv==1.0.1
+
+# --- 스킬 실행 의존성 (SOURCE_PROJECT_ROOT/00_시작안내/requirements.txt와 동일 버전 고정) ---
+pandas==2.3.3
+openpyxl==3.1.5
+shapely==2.1.2

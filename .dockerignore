@@ -1,0 +1,11 @@
+.git
+.env
+docs/
+data-ingestion-backend/docs/
+result/
+완성본_전세계_항공로_지도.html
+design-proposal.html
+**/__pycache__/
+**/*.pyc
+.DS_Store
+node_modules/

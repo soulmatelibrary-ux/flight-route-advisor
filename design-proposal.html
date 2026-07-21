@@ -1,0 +1,503 @@
+<title>결정 중심 항공로 어드바이저 — UI 제안</title>
+<style>
+  :root{
+    --paper:#fbfbf9; --panel:#ffffff; --ink:#22303c; --ink-soft:#5f7080; --ink-faint:#8b9aa6;
+    --hairline:#e3e5e2; --hairline-soft:#eef0ed;
+    --orange:#e8590c; --orange-soft:#fbe6d8; --blue:#1d5fae; --blue-soft:#dde8f6;
+    --good:#2f9e44; --warn:#c47f04; --crit:#e03131;
+    --shadow:0 1px 2px rgba(34,48,60,.05),0 8px 24px rgba(34,48,60,.06);
+    --mono:ui-monospace,"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","Pretendard Variable",Pretendard,"Malgun Gothic",sans-serif;
+    --maxw:1080px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#141b23; --panel:#1b2530; --ink:#e7ecef; --ink-soft:#9fb0bc; --ink-faint:#71828f;
+      --hairline:#2b3742; --hairline-soft:#232f39;
+      --orange:#ff7a3d; --orange-soft:#3a2417; --blue:#5f97e0; --blue-soft:#17273d;
+      --good:#57b96a; --warn:#e0a838; --crit:#f26a6a;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#fbfbf9; --panel:#ffffff; --ink:#22303c; --ink-soft:#5f7080; --ink-faint:#8b9aa6;
+    --hairline:#e3e5e2; --hairline-soft:#eef0ed;
+    --orange:#e8590c; --orange-soft:#fbe6d8; --blue:#1d5fae; --blue-soft:#dde8f6;
+    --good:#2f9e44; --warn:#c47f04; --crit:#e03131;
+    --shadow:0 1px 2px rgba(34,48,60,.05),0 8px 24px rgba(34,48,60,.06);
+  }
+  :root[data-theme="dark"]{
+    --paper:#141b23; --panel:#1b2530; --ink:#e7ecef; --ink-soft:#9fb0bc; --ink-faint:#71828f;
+    --hairline:#2b3742; --hairline-soft:#232f39;
+    --orange:#ff7a3d; --orange-soft:#3a2417; --blue:#5f97e0; --blue-soft:#17273d;
+    --good:#57b96a; --warn:#e0a838; --crit:#f26a6a;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    line-height:1.55;-webkit-font-smoothing:antialiased;letter-spacing:.1px}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--orange);font-weight:600}
+  h1{font-size:clamp(28px,4.6vw,44px);line-height:1.08;margin:.35em 0 .2em;font-weight:700;
+    letter-spacing:-.015em;text-wrap:balance}
+  h2{font-size:clamp(19px,2.4vw,24px);margin:0 0 .1em;font-weight:680;letter-spacing:-.01em;text-wrap:balance}
+  h3{font-size:15px;margin:0;font-weight:640}
+  p{margin:.5em 0}
+  .lead{font-size:clamp(16px,1.9vw,19px);color:var(--ink-soft);max-width:64ch}
+  .mono{font-family:var(--mono)}
+  hr{border:0;border-top:1px solid var(--hairline);margin:0}
+
+  /* header */
+  header{border-bottom:1px solid var(--hairline);background:
+    linear-gradient(180deg,color-mix(in srgb,var(--orange) 5%,var(--paper)),var(--paper))}
+  .topbar{display:flex;align-items:center;gap:12px;height:56px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:680;font-size:14px}
+  .glyph{width:22px;height:22px;color:var(--orange)}
+  .topbar .sp{flex:1}
+  .theme{font-family:var(--mono);font-size:11px;color:var(--ink-soft);border:1px solid var(--hairline);
+    background:var(--panel);border-radius:999px;padding:5px 11px;cursor:pointer}
+  .theme:hover{color:var(--ink);border-color:var(--ink-faint)}
+  .hero{padding:38px 0 30px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:16px;font-family:var(--mono);font-size:11.5px;color:var(--ink-faint)}
+  .meta b{color:var(--ink-soft);font-weight:600}
+
+  section{padding:34px 0}
+  .sechead{display:flex;align-items:baseline;gap:12px;margin-bottom:18px}
+  .sechead .n{font-family:var(--mono);font-size:12px;color:var(--ink-faint);letter-spacing:.05em}
+
+  .thesis{background:var(--panel);border:1px solid var(--hairline);border-left:3px solid var(--orange);
+    border-radius:10px;padding:20px 22px;box-shadow:var(--shadow)}
+  .thesis strong{color:var(--orange)}
+
+  /* cockpit mockup */
+  .cockpit{border:1px solid var(--hairline);border-radius:14px;overflow:hidden;background:var(--panel);
+    box-shadow:var(--shadow)}
+  .ck-top{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--hairline);
+    background:color-mix(in srgb,var(--ink) 3%,var(--panel))}
+  .ck-title{font-size:12.5px;font-weight:660}
+  .badge{font-family:var(--mono);font-size:10.5px;padding:3px 8px;border-radius:999px;border:1px solid transparent;display:inline-flex;gap:6px;align-items:center}
+  .badge.live{background:var(--orange-soft);color:var(--orange);border-color:color-mix(in srgb,var(--orange) 30%,transparent)}
+  .dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:pulse 1.8s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @media (prefers-reduced-motion:reduce){.dot{animation:none}}
+  .modes{display:flex;gap:4px;margin-left:auto}
+  .mode{font-family:var(--mono);font-size:10.5px;padding:4px 9px;border-radius:7px;border:1px solid var(--hairline);
+    background:var(--panel);color:var(--ink-soft);cursor:pointer;white-space:nowrap}
+  .mode[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .mode:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+  .ck-body{display:grid;grid-template-columns:214px 1fr 206px;min-height:390px}
+  .ck-col{padding:13px}
+  .ck-left{border-right:1px solid var(--hairline)}
+  .ck-right{border-left:1px solid var(--hairline);background:color-mix(in srgb,var(--ink) 2%,var(--panel))}
+  .ck-map{position:relative;padding:0;background:
+    radial-gradient(120% 100% at 50% 0%,color-mix(in srgb,var(--blue) 6%,var(--panel)),var(--panel))}
+  .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 9px}
+  .field{border:1px solid var(--hairline);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:var(--panel)}
+  .field .k{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.12em}
+  .field .v{font-weight:660;font-size:14px}
+  .route{border:1px solid var(--hairline);border-radius:8px;padding:9px 10px;margin-bottom:7px;cursor:default;background:var(--panel)}
+  .route.sel{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange) inset;background:var(--orange-soft)}
+  .route .r1{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;font-weight:640}
+  .route .r2{font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);margin-top:3px;display:flex;gap:10px}
+  .tag{font-family:var(--mono);font-size:9px;padding:1px 6px;border-radius:5px;background:var(--blue-soft);color:var(--blue)}
+  .rec{background:var(--orange);color:#fff}
+  .metric{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px dashed var(--hairline)}
+  .metric:last-child{border-bottom:0}
+  .metric .val{font-family:var(--mono);font-weight:600}
+  .sev-good{color:var(--good)} .sev-warn{color:var(--warn)} .sev-crit{color:var(--crit)}
+  .bar{height:5px;border-radius:3px;background:var(--hairline);overflow:hidden;margin-top:5px}
+  .bar>i{display:block;height:100%;background:var(--blue)}
+  svg .fade{opacity:0;transition:opacity .45s ease}
+  svg .show{opacity:1}
+  svg .wxlayer{opacity:0;transition:opacity .3s ease;pointer-events:none}
+  svg .wxlayer.show{opacity:1}
+  .wxctrl{position:absolute;left:12px;top:10px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;max-width:calc(100% - 24px)}
+  .wxlbl{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-right:2px}
+  .wxchip{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:6px;border:1px solid var(--hairline);
+    background:color-mix(in srgb,var(--panel) 88%,transparent);color:var(--ink-faint);cursor:pointer;backdrop-filter:blur(2px)}
+  .wxchip.on{color:var(--ink);border-color:var(--ink-faint)}
+  .wxchip.on::before{content:"● ";color:var(--orange);font-size:8px}
+  .wxchip:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+  .wxlegend{position:absolute;right:12px;top:10px;display:flex;gap:9px;font-family:var(--mono);font-size:9px;color:var(--ink-soft);
+    background:color-mix(in srgb,var(--panel) 85%,transparent);padding:4px 8px;border-radius:6px;border:1px solid var(--hairline);backdrop-filter:blur(2px)}
+  .wxlegend span{display:inline-flex;align-items:center;gap:4px}
+  .wxlegend i{width:9px;height:4px;border-radius:2px;display:inline-block}
+  .caption{font-size:12px;color:var(--ink-faint);margin-top:10px;font-family:var(--mono)}
+
+  /* grids */
+  .grid{display:grid;gap:14px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:1fr 1fr}
+  .card{background:var(--panel);border:1px solid var(--hairline);border-radius:11px;padding:16px 17px;box-shadow:var(--shadow)}
+  .card .kicker{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--blue);font-weight:600}
+  .card.mode0 .kicker{color:var(--orange)}
+  .card p{font-size:13.5px;color:var(--ink-soft);margin:.45em 0 0}
+  .card h3{margin-top:5px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--hairline);border-radius:11px;background:var(--panel);box-shadow:var(--shadow)}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--hairline-soft);vertical-align:top}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+  tr:last-child td{border-bottom:0}
+  td b{font-weight:640}
+  .pro::before{content:"+ ";color:var(--good);font-weight:700}
+  .con::before{content:"– ";color:var(--crit);font-weight:700}
+  .fix::before{content:"→ ";color:var(--blue);font-weight:700}
+
+  /* before/after */
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .ba .b{border:1px dashed var(--hairline);border-radius:11px;padding:15px 16px}
+  .ba .a{border:1px solid var(--orange);border-radius:11px;padding:15px 16px;background:var(--orange-soft)}
+  .ba .lbl2{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+  .ba .b .lbl2{color:var(--ink-faint)} .ba .a .lbl2{color:var(--orange)}
+  .ba ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--ink-soft)}
+  .ba li{margin:5px 0}
+
+  /* queue */
+  .queue{display:flex;flex-direction:column;gap:8px}
+  .qitem{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+    border:1px solid var(--hairline);border-left:3px solid var(--ink-faint);border-radius:9px;padding:10px 13px;background:var(--panel)}
+  .qitem.warn{border-left-color:var(--warn)} .qitem.crit{border-left-color:var(--crit)} .qitem.info{border-left-color:var(--blue)}
+  .qitem .t{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+  .qitem .m{font-size:13px}.qitem .m b{font-weight:660}
+  .qitem .act{font-family:var(--mono);font-size:10.5px;color:var(--blue)}
+  .pre-mermaid{overflow-x:auto;border:1px solid var(--hairline);border-radius:11px;background:var(--panel);padding:14px;box-shadow:var(--shadow)}
+
+  /* decisions */
+  .dec{counter-reset:d;display:flex;flex-direction:column;gap:11px}
+  .dec .di{display:grid;grid-template-columns:auto 1fr;gap:14px;border:1px solid var(--hairline);border-radius:11px;padding:15px 17px;background:var(--panel);box-shadow:var(--shadow)}
+  .dec .di::before{counter-increment:d;content:"Q" counter(d);font-family:var(--mono);font-weight:700;color:var(--orange);font-size:13px;padding-top:2px}
+  .dec h3{margin-bottom:3px}
+  .dec p{font-size:13.5px;color:var(--ink-soft);margin:0}
+  .opt{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);margin-top:7px}
+  .opt em{color:var(--orange);font-style:normal;font-weight:600}
+
+  footer{border-top:1px solid var(--hairline);padding:22px 0 40px;color:var(--ink-faint);font-size:12px;font-family:var(--mono)}
+  .note{font-size:12px;color:var(--ink-faint);font-family:var(--mono)}
+  @media (max-width:860px){
+    .ck-body{grid-template-columns:1fr}
+    .ck-left,.ck-right{border:0;border-bottom:1px solid var(--hairline)}
+    .g3,.g2,.ba{grid-template-columns:1fr}
+    .modes{width:100%;margin:0;overflow-x:auto}
+  }
+</style>
+
+<header>
+  <div class="wrap topbar">
+    <span class="brand"><svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16l20-6-9 12-2-5-9-1z"/></svg>Flight Route Advisor</span>
+    <span class="sp"></span>
+    <button class="theme" id="themeBtn" type="button">◐ 테마</button>
+  </div>
+  <div class="wrap hero">
+    <div class="eyebrow">UI 설계 제안 · 의사결정자 관점</div>
+    <h1>전세계 지도를 다 그리지 않는다.<br>지금 결정하는 루트만 보여준다.</h1>
+    <p class="lead">완성본 지도는 전세계 항공로 25만+ 도형을 상시 렌더한다. 관제·운항 의사결정자에게 필요한 것은 “세계 전체”가 아니라 “이 비행을 어디로 보낼까”다. 세계 데이터는 그대로 보유하되, 기본 화면은 <b>선택한 출·도착과 후보 루트의 FIR·항공로만</b> 보여주는 <b>결정 중심(cockpit)</b> UI를 제안한다.</p>
+    <div class="meta">
+      <span><b>기준</b> 완성본_전세계_항공로_지도.html</span>
+      <span><b>데이터</b> ODR2·ACDM·FOIS·흐름관리 (processed_*)</span>
+      <span><b>정체성 계승</b> ink/paper · orange #e8590c · blue #1d5fae</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <div class="thesis">
+      <p style="margin:0;font-size:15.5px"><strong>핵심 제안.</strong> 전세계 지도는 “옵션(전세계 모드)”으로 두고, <strong>기본은 결정 포커스</strong>로 전환한다. 사용자가 OD와 후보 루트를 고르면 그 경로가 지나는 FIR·항공로·트랙만 그리고 화면을 자동으로 맞춘다(fit-bounds). 정보 과부하와 렌더 비용이 함께 줄고, 결정 근거(경유 FIR·상층풍·지연원인·흐름관리)가 한 화면에 모인다.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="n">01</span><h2>제안 화면 — 결정 콕핏</h2></div>
+    <p class="note" style="margin:-6px 0 16px">아래는 개념 목업입니다. 지도는 실제 지리가 아닌 스키매틱이며, 뷰 모드 버튼으로 “선택적 표시”가 실제로 어떻게 작동하는지 확인할 수 있습니다.</p>
+
+    <div class="cockpit">
+      <div class="ck-top">
+        <span class="ck-title">RKSI → VHHH · 오늘 계획 743편</span>
+        <span class="badge live"><span class="dot"></span>실시간 수신 · 결정 큐 3</span>
+        <div class="modes" role="group" aria-label="뷰 모드">
+          <button class="mode" id="m0" aria-pressed="true" type="button">① 결정 포커스</button>
+          <button class="mode" id="m1" aria-pressed="false" type="button">② 지역 컨텍스트</button>
+          <button class="mode" id="m2" aria-pressed="false" type="button">③ 전세계</button>
+        </div>
+      </div>
+      <div class="ck-body">
+        <!-- LEFT: decision panel -->
+        <div class="ck-col ck-left">
+          <p class="lbl">의사결정</p>
+          <div class="field"><div class="k">출발</div><div class="v">RKSI 인천</div></div>
+          <div class="field"><div class="k">도착</div><div class="v">VHHH 홍콩</div></div>
+          <p class="lbl" style="margin-top:14px">후보 루트</p>
+          <div class="route sel">
+            <div class="r1">경로 1 <span class="tag rec">추천</span></div>
+            <div class="r2"><span>740편</span><span>평균 463′</span><span class="sev-good">정시 84%</span></div>
+          </div>
+          <div class="route">
+            <div class="r1">경로 2 <span class="tag">최단</span></div>
+            <div class="r2"><span>210편</span><span>458′</span><span class="sev-warn">정시 71%</span></div>
+          </div>
+          <div class="route">
+            <div class="r1">경로 3</div>
+            <div class="r2"><span>96편</span><span>+12′</span><span class="sev-good">정시 88%</span></div>
+          </div>
+        </div>
+
+        <!-- CENTER: focus map (schematic SVG) -->
+        <div class="ck-col ck-map">
+          <svg id="map" viewBox="0 0 520 390" width="100%" height="100%" role="img" aria-label="선택 루트와 경유 FIR을 강조한 스키매틱 지도" style="display:block">
+            <!-- world graticule (mode 3) -->
+            <g id="world" class="fade">
+              <g stroke="var(--hairline)" stroke-width="1" opacity=".8">
+                <line x1="0" y1="98" x2="520" y2="98"/><line x1="0" y1="196" x2="520" y2="196"/><line x1="0" y1="294" x2="520" y2="294"/>
+                <line x1="104" y1="0" x2="104" y2="390"/><line x1="208" y1="0" x2="208" y2="390"/><line x1="312" y1="0" x2="312" y2="390"/><line x1="416" y1="0" x2="416" y2="390"/>
+              </g>
+              <g fill="var(--ink-faint)" opacity=".5">
+                <circle cx="70" cy="70" r="2"/><circle cx="150" cy="130" r="2"/><circle cx="450" cy="90" r="2"/><circle cx="400" cy="300" r="2"/><circle cx="90" cy="320" r="2"/><circle cx="480" cy="230" r="2"/>
+              </g>
+            </g>
+            <!-- adjacent FIRs (mode 2 & 3) -->
+            <g id="adjacent" class="fade">
+              <path d="M60,120 q60,-30 130,-10 q40,60 -10,120 q-90,30 -140,-20 q-20,-60 20,-90z" fill="var(--blue-soft)" stroke="var(--blue)" stroke-width="1" opacity=".6"/>
+              <path d="M330,60 q80,-10 120,40 q10,70 -50,90 q-70,10 -90,-40 q-10,-60 20,-90z" fill="var(--blue-soft)" stroke="var(--blue)" stroke-width="1" opacity=".55"/>
+              <text x="95" y="185" font-family="var(--mono)" font-size="10" fill="var(--blue)">RJJJ 후쿠오카</text>
+              <text x="360" y="120" font-family="var(--mono)" font-size="10" fill="var(--blue)">RCAA 타이베이</text>
+            </g>
+            <!-- focus FIR: Incheon (always) -->
+            <path d="M170,150 q70,-40 150,-15 q45,55 5,150 q-95,45 -170,-5 q-35,-70 15,-125z"
+                  fill="var(--orange-soft)" stroke="var(--orange)" stroke-width="1.5"/>
+            <!-- FIR weather severity tint (precip) -->
+            <g id="wxfir" class="wxlayer show"><path d="M250,175 q55,10 60,70 q-40,40 -90,20 q-20,-55 30,-110z"
+                  fill="var(--crit)" opacity=".13"/></g>
+            <text x="205" y="300" font-family="var(--mono)" font-size="11" fill="var(--orange)" font-weight="600">RKRR 인천 FIR</text>
+            <!-- ATS airways network within focus (FIR + 항로 함께) -->
+            <g id="airways" stroke="var(--ink-soft)" stroke-width="1" fill="none" opacity=".38">
+              <path d="M185,175 L300,150 L415,140"/><path d="M195,245 L330,220 L450,185"/>
+              <path d="M300,150 L330,220"/><path d="M245,140 L280,300"/><path d="M415,140 L360,230"/>
+            </g>
+            <!-- alternate route (blue dashed) -->
+            <path d="M235,200 L300,150 L380,170 L450,120" fill="none" stroke="var(--blue)" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
+            <!-- selected route (orange) -->
+            <path d="M235,205 L295,178 L360,205 L440,150" fill="none" stroke="var(--orange)" stroke-width="3"/>
+            <!-- waypoints -->
+            <g fill="var(--panel)" stroke="var(--ink)" stroke-width="1.5">
+              <circle cx="235" cy="205" r="4.5"/><circle cx="295" cy="178" r="4"/><circle cx="360" cy="205" r="4"/>
+            </g>
+            <circle cx="440" cy="150" r="5" fill="var(--orange)" stroke="var(--panel)" stroke-width="1.5"/>
+            <circle cx="235" cy="205" r="5" fill="var(--ink)" stroke="var(--panel)" stroke-width="1.5"/>
+            <g font-family="var(--mono)" font-size="9.5" fill="var(--ink-soft)">
+              <text x="212" y="224">RKSI</text><text x="286" y="168">ATOTI</text><text x="350" y="224">TESIM</text><text x="446" y="146">VHHH</text>
+            </g>
+            <!-- WEATHER: shear overlay on selected route (green<=4 / amber 4-7 / red>7) -->
+            <g id="wxshear" class="wxlayer show" stroke-linecap="round" opacity=".85">
+              <path d="M235,205 L295,178" stroke="var(--good)" stroke-width="9" opacity=".38"/>
+              <path d="M295,178 L360,205" stroke="var(--warn)" stroke-width="9" opacity=".4"/>
+              <path d="M360,205 L440,150" stroke="var(--crit)" stroke-width="9" opacity=".34"/>
+            </g>
+            <!-- WEATHER: airport category badges at endpoints -->
+            <g id="wxapt" class="wxlayer show" font-family="var(--mono)" font-size="8.5" font-weight="700">
+              <g transform="translate(214,192)"><rect x="-2" y="-9" width="42" height="13" rx="6.5" fill="var(--warn)"/><text x="3" y="0" fill="#fff">RKSI MVFR</text></g>
+              <g transform="translate(430,132)"><rect x="-2" y="-9" width="36" height="13" rx="6.5" fill="var(--good)"/><text x="3" y="0" fill="#fff">VHHH VFR</text></g>
+            </g>
+            <!-- WEATHER: radar precip patch (toggle, default off) -->
+            <g id="wxradar" class="wxlayer"><ellipse cx="320" cy="120" rx="55" ry="34" fill="var(--blue)" opacity=".16"/><ellipse cx="330" cy="115" rx="30" ry="18" fill="var(--blue)" opacity=".22"/></g>
+          </svg>
+          <div class="wxctrl" role="group" aria-label="기상 레이어">
+            <span class="wxlbl">기상</span>
+            <button class="wxchip on" data-wx="wxshear" type="button">시어/상층풍</button>
+            <button class="wxchip on" data-wx="wxapt" type="button">공항</button>
+            <button class="wxchip on" data-wx="wxfir" type="button">FIR 강수</button>
+            <button class="wxchip" data-wx="wxradar" type="button">레이더</button>
+          </div>
+          <div class="wxlegend"><span><i style="background:var(--good)"></i>시어≤4</span><span><i style="background:var(--warn)"></i>4–7</span><span><i style="background:var(--crit)"></i>&gt;7</span></div>
+          <div style="position:absolute;left:12px;bottom:10px" class="caption" id="mapcap">FIR·항로 + 선택 루트만 표시 · 기상 오버레이 · 자동 fit-bounds</div>
+        </div>
+
+        <!-- RIGHT: rationale -->
+        <div class="ck-col ck-right">
+          <p class="lbl">의사결정 근거</p>
+          <div class="metric"><span>경유 FIR</span><span class="val">RKRR·RCAA·VHHK</span></div>
+          <div class="metric"><span>상층풍(FL340)</span><span class="val sev-good">배풍 +18kt</span></div>
+          <div class="metric"><span>CAT 시어</span><span class="val sev-warn">보통 5.1</span></div>
+          <div class="metric"><span>지연원인(FOIS)</span><span class="val">흐름 32%</span></div>
+          <div class="metric"><span>흐름관리</span><span class="val sev-crit">MIT 발효</span></div>
+          <p class="lbl" style="margin-top:15px">추천 순항고도</p>
+          <div style="font-family:var(--mono);font-size:13px;font-weight:660">FL340 <span class="sev-good">★</span></div>
+          <div class="bar"><i style="width:72%"></i></div>
+          <p class="note" style="margin-top:7px;font-size:10.5px">시어≤7 중 소요 단축 최대</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="n">02</span><h2>세 가지 뷰 모드</h2></div>
+    <div class="grid g3">
+      <div class="card mode0">
+        <div class="kicker">기본</div><h3>① 결정 포커스</h3>
+        <p>선택한 OD·후보 루트의 경유 FIR·항공로·트랙만. 도형 수 급감 → 빠르고 모바일에도 적합. 결정에 필요한 것만 남긴다.</p>
+      </div>
+      <div class="card">
+        <div class="kicker">주변</div><h3>② 지역 컨텍스트</h3>
+        <p>인천 FIR + 인접 FIR·관제 섹터. “옆에 무엇이 있는지” 맥락을 확인할 때. 포커스와 전세계의 중간.</p>
+      </div>
+      <div class="card">
+        <div class="kicker">옵션</div><h3>③ 전세계</h3>
+        <p>완성본과 동일한 전 레이어. 탐색·전체 조망용. 버리지 않고 온디맨드로 로드 — 필요할 때만 부른다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="n">03</span><h2>기상 자료 표시 방식 — 제안</h2></div>
+    <p class="lead" style="font-size:15.5px;margin-bottom:16px">원칙: <b>결정 영향 순서로 계층화</b>하고, 위험도 색(초록·주황·빨강)은 <b>브랜드 accent(orange/blue)와 분리</b>한다. 기본은 최소로 얹고, 상세는 <b>토글·클릭</b>으로. 위 목업 지도의 “기상” 칩으로 각 레이어를 켜고 끌 수 있다.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:26%">레이어</th><th style="width:40%">표시 방식</th><th>기본</th><th style="width:16%">단계</th></tr></thead>
+        <tbody>
+          <tr><td><b>① 경로 위 시어·상층풍</b></td><td>선택 루트를 CAT 시어 등급으로 세그먼트 색칠(<span class="sev-good">≤4</span>/<span class="sev-warn">4–7</span>/<span class="sev-crit">&gt;7</span>). 고도 변경 시 갱신 → “어느 고도·루트가 안전·빠른가”에 직결</td><td class="mono">미표시</td><td class="mono">2단계(04-E)</td></tr>
+          <tr><td><b>② 공항 기상 카테고리</b></td><td>출·도착점에 VFR/MVFR/IFR/LIFR 색 뱃지, 클릭 시 METAR/TAF 팝업(실황·예보 타임라인)</td><td class="mono sev-good">항상</td><td class="mono">MVP</td></tr>
+          <tr><td><b>③ 경유 FIR 심각도</b></td><td>포커스 FIR 면에 강수·위험 틴트(옅게). <b>전세계가 아니라 경유 FIR만</b> → 과부하 없음</td><td class="mono sev-good">항상</td><td class="mono">MVP</td></tr>
+          <tr><td><b>④ 위험기상(SIGMET/PIREP)</b></td><td>근거 패널에 칩(TS·ICE·TURB) + 루트와 교차하면 지도에 경고 마커</td><td class="mono">조건부</td><td class="mono">MVP</td></tr>
+          <tr><td><b>⑤ 기상 레이더(RainViewer)</b></td><td>토글 레이어 + 재생 바(과거 2h). 결정 포커스에선 <b>기본 OFF</b>, 필요 시 ON(온디맨드)</td><td class="mono sev-warn">토글</td><td class="mono">MVP</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:12px">우측 “의사결정 근거” 패널은 수치 요약을 담당 — 지도 오버레이(공간)와 패널(수치)을 역할 분리한다. <b>MVP는 경유 FIR 체인만 채운다</b>. 배풍/정풍·측풍·시어 등급·★추천 고도(①)·지연원인(FOIS)·흐름관리 상태는 2단계 진입 후 추가되며, 위 목업(01 콕핏)의 우측 패널·후보 루트 “정시%”·좌측 실시간 배지는 <b>2단계 이후 완성 상태를 보여주는 목표 화면</b>이다.</p>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="n">04</span><h2>“선택적 표시” 설계 검토</h2></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:33%">관점</th><th>평가</th></tr></thead>
+        <tbody>
+          <tr><td><b>사용자 이점</b></td><td>
+            <div class="pro">결정에 집중 — 무관한 전세계 요소 제거</div>
+            <div class="pro">클릭·탐색 비용↓, 근거가 한 화면에</div>
+            <div class="pro">렌더 도형↓ → 초기 로딩·모바일·성능 유리</div>
+          </td></tr>
+          <tr><td><b>리스크</b></td><td>
+            <div class="con">전체 맥락 상실 — “주변 상황”이 안 보일 수 있음</div>
+          </td></tr>
+          <tr><td><b>완화책</b></td><td>
+            <div class="fix">우상단 <b>미니맵</b>에 전세계 상 현재 포커스 위치 표시</div>
+            <div class="fix">원클릭 <b>전세계 토글</b> + 지역 컨텍스트 모드</div>
+          </td></tr>
+          <tr><td><b>완성본 자산</b></td><td>
+            <div class="fix">전 레이어 데이터·렌더 알고리즘(사전투영 캔버스)은 <b>그대로 보존</b> — “전세계 모드”로 흡수. 표시 범위만 결정 주도로 제어</div>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="n">05</span><h2>완성본 대비 무엇이 나아지나</h2></div>
+    <div class="ba">
+      <div class="b">
+        <div class="lbl2">완성본 (현재)</div>
+        <ul>
+          <li>전세계 25만+ 도형 상시 렌더</li>
+          <li>결정 대상까지 탐색 필요</li>
+          <li>단일 HTML ~15MB 임베드</li>
+          <li>근거(기상·정시성·흐름)가 분산</li>
+        </ul>
+      </div>
+      <div class="a">
+        <div class="lbl2">결정 콕핏 (제안)</div>
+        <ul>
+          <li>선택 루트의 FIR·항공로만 (자동 fit)</li>
+          <li>OD 선택 → 후보·근거 즉시 정렬</li>
+          <li>API+DB 동적 로딩(참조는 캐시)</li>
+          <li>근거 3-패널로 한 화면 통합</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="n">06</span><h2>향후 — 실시간 의사결정 구조</h2></div>
+    <p class="lead" style="font-size:15.5px">비행계획서·ACDM·FOIS 전처리 데이터가 <b>실시간 수신</b>되면, 그 즉시 판단이 필요한 항목을 <b>“지금 결정 큐”</b>로 우선순위화해 콕핏 상단에 띄운다. (현 MVP는 배치, 이는 향후 단계 설계)</p>
+    <div class="grid g2" style="margin-top:8px;align-items:start">
+      <div class="card" style="padding:15px 16px">
+        <div class="kicker mono" style="color:var(--orange)">지금 결정 큐</div>
+        <div class="queue" style="margin-top:11px">
+          <div class="qitem crit"><span class="t">14:02</span><span class="m"><b>KAL672</b> 흐름관리 MIT 발효 — 경로 영향</span><span class="act">보기 →</span></div>
+          <div class="qitem warn"><span class="t">14:05</span><span class="m"><b>AAR521</b> 지연 위험 상승 (ACDM 예측)</span><span class="act">대안 →</span></div>
+          <div class="qitem info"><span class="t">14:09</span><span class="m"><b>RKSI→RJTT</b> 상층풍 변화 — 고도 재검토</span><span class="act">보기 →</span></div>
+        </div>
+        <p class="note" style="margin-top:10px;font-size:10.5px">항목 클릭 → 해당 OD·루트로 결정 포커스 자동 전환</p>
+      </div>
+      <div>
+        <pre class="mermaid pre-mermaid">
+flowchart LR
+  SRC["실시간 소스\n비행계획서·ACDM·FOIS"] --> ING["실시간 수신·전처리\n(스킬 재사용)"]
+  ING --> BUS["이벤트 버스"]
+  BUS --> DEC["결정 엔진\n지연위험·흐름발효·경로영향"]
+  BUS --> STORE["processed_* + 실시간 뷰"]
+  DEC --> Q["지금 결정 큐"]
+  STORE --> API["advisor API"]
+  Q --> API
+  API --> UI["결정 콕핏 UI"]
+        </pre>
+        <p class="note" style="margin-top:8px">전처리 로직은 재사용, 수신만 배치→스트리밍. 읽기 전용·최신본 규약 유지.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="n">07</span><h2>결정이 필요한 지점</h2></div>
+    <div class="dec">
+      <div class="di"><div><h3>기본 뷰를 “결정 포커스”로 전환 <span style="color:var(--good);font-size:12px">✓ 결정됨</span></h3><p>전세계 지도를 기본에서 내리고 옵션(전세계 모드)으로 둔다. FIR·항로를 함께 표시.</p><div class="opt"><em>채택</em> (2026-07-21) — docs/10·04 반영</div></div></div>
+      <div class="di"><div><h3>맥락 유지 장치 범위</h3><p>미니맵 + 지역 컨텍스트 모드 둘 다 넣을지, 미니맵만으로 충분할지.</p><div class="opt"><em>제안</em> 미니맵 + 지역 컨텍스트 모두</div></div></div>
+      <div class="di"><div><h3>실시간 의사결정은 향후 단계로</h3><p>“지금 결정 큐”·이벤트 버스·결정 엔진은 MVP 이후 별도 설계·검증 단계.</p><div class="opt"><em>제안</em> 문서(10-ui-and-realtime)에 향후 단계로 확정 — 완료</div></div></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  Flight Route Advisor · UI 설계 제안 · 운영앱은 Pretendard + IBM Plex Mono 사용(본 목업은 시스템 글꼴로 근사) · 스키매틱 목업, 실제 지리 아님
+</footer>
+
+<script>
+  // theme toggle
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('themeBtn');
+    btn.addEventListener('click',function(){
+      var cur=root.getAttribute('data-theme');
+      if(!cur){cur=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}
+      root.setAttribute('data-theme', cur==='dark'?'light':'dark');
+    });
+  })();
+  // view modes
+  (function(){
+    var modes=[document.getElementById('m0'),document.getElementById('m1'),document.getElementById('m2')];
+    var adjacent=document.getElementById('adjacent'), world=document.getElementById('world');
+    var cap=document.getElementById('mapcap');
+    var caps=['FIR·항로 + 선택 루트만 · 기상 오버레이 · 자동 fit-bounds',
+              '인천 FIR + 인접 FIR·섹터·항로 표시',
+              '전세계 전 레이어 (온디맨드 로드)'];
+    function set(i){
+      modes.forEach(function(b,j){b.setAttribute('aria-pressed', j===i?'true':'false');});
+      adjacent.classList.toggle('show', i>=1);
+      world.classList.toggle('show', i>=2);
+      cap.textContent=caps[i];
+    }
+    modes.forEach(function(b,i){b.addEventListener('click',function(){set(i);});});
+    set(0);
+  })();
+  // weather layer toggles
+  (function(){
+    document.querySelectorAll('.wxchip').forEach(function(chip){
+      chip.addEventListener('click',function(){
+        var g=document.getElementById(chip.getAttribute('data-wx'));
+        var on=chip.classList.toggle('on');
+        if(g) g.classList.toggle('show', on);
+      });
+    });
+  })();
+</script>

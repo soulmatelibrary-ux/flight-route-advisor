@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>run 상세</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<h1>run 상세</h1>
+<nav><a href="/runs">목록으로</a></nav>
+
+<dl>
+<dt>run_id</dt><dd>{{ run.id }}</dd>
+<dt>유형</dt><dd>{{ run.run_type }}</dd>
+<dt>상태</dt><dd><span class="badge badge-{{ run.status|lower }}">{{ run.status }}</span></dd>
+<dt>시작</dt><dd>{{ run.started_at or '-' }}</dd>
+<dt>종료</dt><dd>{{ run.finished_at or '-' }}</dd>
+{% if run.error_message %}<dt>오류</dt><dd><pre>{{ run.error_message }}</pre></dd>{% endif %}
+</dl>
+
+<h2>입력 파일</h2>
+<table>
+<thead><tr><th>파일명</th><th>유형</th><th>행수</th><th>업로드시각</th></tr></thead>
+<tbody>
+{% for f in input_files %}
+<tr><td>{{ f.original_filename }}</td><td>{{ f.file_type }}</td><td>{{ f.row_count }}</td><td>{{ f.uploaded_at }}</td></tr>
+{% else %}
+<tr><td colspan="4">입력 파일 없음</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>검증 요약</h2>
+{% if run.validation_summary %}
+<pre>{{ run.validation_summary }}</pre>
+{% else %}
+<p>검증 요약 없음(아직 처리 중이거나 검증 단계 전)</p>
+{% endif %}
+
+<h2>산출물 다운로드</h2>
+{% if run.output_paths %}
+<ul>
+{% for key in run.output_paths.keys() %}
+<li><a href="/runs/{{ run.id }}/download/{{ key }}">{{ key }}</a></li>
+{% endfor %}
+</ul>
+{% else %}
+<p>아직 산출물 없음</p>
+{% endif %}
+
+<h2>로그</h2>
+<table>
+<thead><tr><th>시각</th><th>레벨</th><th>소스</th><th>메시지</th></tr></thead>
+<tbody>
+{% for l in logs %}
+<tr><td>{{ l.ts }}</td><td>{{ l.level }}</td><td>{{ l.source }}</td><td><pre>{{ l.message }}</pre></td></tr>
+{% else %}
+<tr><td colspan="4">로그 없음</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</body>
+</html>

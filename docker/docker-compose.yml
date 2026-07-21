@@ -1,0 +1,54 @@
+# 로컬 개발 환경. 항상 저장소 루트(flight-route-advisor/)에서 실행해 .env를 자동 인식시킨다:
+#   docker compose -f docker/docker-compose.yml up -d db
+# route-api·weather는 Stage 1 코드(backend/app/main.py)가 갖춰진 뒤 기동한다(docs/07-checklist.md Phase 1).
+#
+# db: 이 저장소가 소유하는 로컬 PostgreSQL(docs/08-setup-and-dev-order.md §2.1). Stage 0가 적재하고 Stage 1·2가 읽기 전용으로 소비한다.
+# route-api: Stage 1 advisor 백엔드(FastAPI, 읽기 전용). Dockerfile은 ../docker/Dockerfile.
+# weather: 기존 Node 기상서버(PORTING_PACKAGE_ROOT/기상서버)를 무변경 재사용 — 읽기 전용 바인드 마운트,
+#          node_modules만 별도 볼륨에 설치해 외부 원본 폴더에 쓰지 않는다(docs/CLAUDE.md §5 원본 무변경).
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  route-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    ports:
+      - "${ROUTE_API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  weather:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ${PORTING_PACKAGE_ROOT}/기상서버:/app:ro
+      - weather-node-modules:/app/node_modules
+    command: sh -c "npm install --omit=dev && node server.js"
+    ports:
+      - "${WEATHER_PORT:-3000}:3000"
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  weather-node-modules:

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>전처리 데이터 업로드</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<h1>전처리 데이터 업로드</h1>
+<nav><a href="/runs">처리 로그 보기</a></nav>
+
+<form method="post" action="/uploads" enctype="multipart/form-data">
+  <label>처리 유형
+    <select name="run_type" id="run_type">
+      {% for rt in run_types %}<option value="{{ rt }}">{{ rt }}</option>{% endfor %}
+    </select>
+  </label>
+
+  <div id="slot-acdm" class="slot-group" hidden>
+    <strong>ACDM</strong> — 출발/도착 파일이 모두 있어야 처리됩니다.
+    <label>공항
+      <select name="airport_ko">
+        {% for a in airports %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>날짜(파일명에 8자리 날짜가 없을 때만, YYYYMMDD)
+      <input type="text" name="date" pattern="\d{8}" placeholder="20260101">
+    </label>
+    <label>출발 파일들 <input type="file" name="departure_file" multiple accept=".csv,.xlsx"></label>
+    <label>도착 파일들 <input type="file" name="arrival_file" multiple accept=".csv,.xlsx"></label>
+  </div>
+
+  <div id="slot-flight_data" class="slot-group" hidden>
+    <strong>비행자료</strong> — 분석/검색 파일이 날짜별로 1:1 쌍이어야 합니다.
+    <label>비행자료분석 파일들 <input type="file" name="analysis" multiple accept=".xlsx"></label>
+    <label>비행자료검색 파일들 <input type="file" name="search" multiple accept=".xlsx"></label>
+  </div>
+
+  <div id="slot-fois" class="slot-group" hidden>
+    <strong>FOIS</strong> — 출발/도착 파일이 모두 있어야 처리됩니다.
+    <label>비정상운항출발 파일들 <input type="file" name="departure" multiple accept=".xlsx"></label>
+    <label>비정상운항도착 파일들 <input type="file" name="arrival" multiple accept=".xlsx"></label>
+  </div>
+
+  <div id="slot-flow_management" class="slot-group" hidden>
+    <strong>흐름관리일지</strong>
+    <label>흐름관리일지 파일들 <input type="file" name="file" multiple accept=".xlsx"></label>
+  </div>
+
+  <label>업로더(선택) <input type="text" name="triggered_by" placeholder="이름/아이디"></label>
+  <label>재시도 키(선택) <input type="text" name="idempotency_key" placeholder="같은 요청 재시도 시 중복 실행 방지"></label>
+
+  <p class="hint">허용 확장자: .csv, .xlsx / 파일당 최대 {{ max_upload_mb }}MB</p>
+  <button type="submit">업로드</button>
+</form>
+
+<script>
+(function () {
+  var groups = document.querySelectorAll('.slot-group');
+  var select = document.getElementById('run_type');
+  function sync() {
+    groups.forEach(function (g) { g.hidden = (g.id !== 'slot-' + select.value); });
+  }
+  select.addEventListener('change', sync);
+  sync();
+})();
+</script>
+</body>
+</html>
