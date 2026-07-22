@@ -50,6 +50,20 @@ def _existing_dir(name: str, value: str) -> Path:
     return path
 
 
+# backend/app/config.py 기준 저장소 루트/frontend 기본 경로(로컬 개발은 env 없이 바로 동작).
+# 컨테이너는 docker/Dockerfile이 FRONTEND_DIR을 명시 설정한다(레이아웃이 다르므로).
+_DEFAULT_FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+
+
+def _resolve_frontend_dir() -> Path | None:
+    """프론트(frontend/) 정적 서빙 경로. 없으면 None(정적 서빙 비활성화, 필수 아님) —
+    backend만 단독 기동(API 전용)하는 워크플로를 깨지 않기 위해 fail-closed가 아니라
+    선택적 기능으로 둔다(docs/06-conventions.md §1 하드코딩 금지, 완료검증 §D-4)."""
+    raw = os.environ.get("FRONTEND_DIR")
+    path = Path(raw).expanduser().resolve() if raw else _DEFAULT_FRONTEND_DIR
+    return path if path.is_dir() else None
+
+
 def _parse_positive_int(name: str, raw: str) -> int:
     try:
         value = int(raw)
@@ -103,6 +117,7 @@ class Settings:
     cors_allowed_origins: tuple[str, ...]
     rate_limit_per_minute: int
     reference_cache_ttl_seconds: int
+    frontend_dir: Path | None
 
     def __repr__(self) -> str:  # 자격증명 노출 방지(docs/06 §8)
         masked = _mask_database_url(self.database_url)
@@ -113,7 +128,8 @@ class Settings:
             f"porting_package_root={self.porting_package_root}, "
             f"cors_allowed_origins={self.cors_allowed_origins}, "
             f"rate_limit_per_minute={self.rate_limit_per_minute}, "
-            f"reference_cache_ttl_seconds={self.reference_cache_ttl_seconds})"
+            f"reference_cache_ttl_seconds={self.reference_cache_ttl_seconds}, "
+            f"frontend_dir={self.frontend_dir})"
         )
 
 
@@ -148,6 +164,7 @@ def load_settings() -> Settings:
             "REFERENCE_CACHE_TTL_SECONDS",
             _optional_env("REFERENCE_CACHE_TTL_SECONDS", "86400"),
         ),
+        frontend_dir=_resolve_frontend_dir(),
     )
 
 

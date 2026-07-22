@@ -79,7 +79,7 @@ export function createReferenceLayers(map, CONFIG) {
         dashArray: "4,4",
         fill: false,
       })
-        .bindTooltip(escapeHtml(t.nameKo), { permanent: true, direction: "center", className: "ref-label tca-label" })
+        .bindPopup(escapeHtml(t.nameKo))
         .addTo(groups.tca);
     }
     updateLabelVisibility();
@@ -116,7 +116,7 @@ export function createReferenceLayers(map, CONFIG) {
         fillColor: CONFIG.tokens.paper,
         fillOpacity: 1,
       })
-        .bindTooltip(escapeHtml(wp.ident), { permanent: true, direction: "top", className: "ref-label wp-label" })
+        .bindPopup(escapeHtml(wp.ident))
         .addTo(groups.waypoints);
     }
     updateLabelVisibility();
@@ -128,7 +128,7 @@ export function createReferenceLayers(map, CONFIG) {
       L.marker(nv.latlng, {
         icon: L.divIcon({ className: "navaid-triangle", iconSize: [10, 10], iconAnchor: [5, 5] }),
       })
-        .bindTooltip(escapeHtml(nv.ident), { permanent: true, direction: "right", className: "ref-label nv-label" })
+        .bindPopup(escapeHtml(nv.ident))
         .addTo(groups.navaids);
     }
     updateLabelVisibility();
@@ -149,8 +149,7 @@ export function createReferenceLayers(map, CONFIG) {
       })
         .bindPopup(
           `<b>${escapeHtml(ap.icao)}</b> ${escapeHtml(ap.name)}<br>고도 ${escapeHtml(ap.elevFt)}ft<br><button data-weather-icao="${escapeHtml(ap.icao)}">공항 기상</button>`,
-        )
-        .bindTooltip(escapeHtml(ap.icao), { permanent: true, direction: "top", className: "ref-label ap-label" });
+        );
       marker.addTo(groups.airportsAll);
       if (lowTypes.has(ap.type)) marker.addTo(groups.airportsLow);
     }
@@ -169,15 +168,16 @@ export function createReferenceLayers(map, CONFIG) {
   }
   map.on("zoomend", applyAirportZoomVisibility);
 
+  // TCA/픽스/항행시설/공항의 permanent 툴팁은 성능 문제(줌 3~5, 항로 89,555·공항 10,030
+  // 규모에서 페이지 응답 없음 발생, 2026-07-23)로 제거했다 — 툴팁은 항상 열려 있는 DOM
+  // 노드라 패닝/줌마다 위치 재계산 비용이 개수에 비례해 쌓인다. FIR·항로 라벨은
+  // interactive:false 정적 divIcon(개수가 작음: FIR 247·항로는 ident당 1개로 dedupe)이라
+  // 유지한다. 나머지는 bindPopup으로 대체해 클릭했을 때만 DOM이 생기도록 했다.
   function updateLabelVisibility() {
     const z = map.getZoom();
     const rules = [
       [".fir-label", CONFIG.display.labelZoom.fir],
       [".airway-label", CONFIG.display.labelZoom.airway],
-      [".tca-label", CONFIG.display.labelZoom.tca],
-      [".wp-label", CONFIG.display.labelZoom.fix],
-      [".nv-label", CONFIG.display.labelZoom.navaid],
-      [".ap-label", CONFIG.display.labelZoom.airportIcao],
     ];
     for (const [selector, threshold] of rules) {
       const show = z >= threshold;

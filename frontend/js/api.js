@@ -39,7 +39,10 @@ async function getJson(path, params) {
       let detail = `HTTP ${res.status}`;
       try {
         const body = await res.json();
-        detail = body.detail ?? body.error ?? detail;
+        // 백엔드 표준 에러 봉투는 {error:{code,message}}다(docs/03 §2, app/envelope.py
+        // error_envelope) — body.error는 문자열이 아니라 객체라 리뷰 전에는 여기서
+        // "[object Object]"로 새던 버그가 있었다(2026-07-22 수정).
+        detail = body.error?.message ?? body.detail ?? detail;
       } catch {
         /* 본문이 JSON이 아님 — 상태코드만 사용 */
       }
@@ -52,6 +55,11 @@ async function getJson(path, params) {
   try {
     return await promise;
   } finally {
+    // 성공·실패 모두 제거한다 — 여기 목적은 "동시에 겹치는 요청"만 하나로 합치는 것이지
+    // 결과를 영구 캐시하는 게 아니다(그건 store.js가 별도로 담당). 성공 시에도 계속
+    // 남겨두면 이후 같은 URL 재요청이 최초 응답에 영구히 고정돼 갱신되지 않는다
+    // (2026-07-22 완료검증 §E에서 "성공 캐싱 유지"안을 명시적으로 기각했는데 코드에는
+    // 잘못 반영돼 있던 것을 바로잡음).
     _inflight.delete(url);
   }
 }
@@ -65,4 +73,6 @@ export const api = {
   airports: ({ bbox, type } = {}) => getJson("/reference/airports", { bbox, type }),
   navaids: ({ bbox } = {}) => getJson("/reference/navaids", { bbox }),
   waypoints: ({ bbox, limit } = {}) => getJson("/reference/waypoints", { bbox, limit }),
+  foisDelays: ({ direction, airport, dateFrom, dateTo } = {}) =>
+    getJson("/fois/delays", { direction, airport, date_from: dateFrom, date_to: dateTo }),
 };

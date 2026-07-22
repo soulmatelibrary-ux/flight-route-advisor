@@ -44,6 +44,31 @@
     <section id="panel-right" class="panel">
       <h2>의사결정 근거</h2>
       <div id="fir-chain" class="fir-chain muted">경로를 선택하면 경유 FIR 체인이 표시됩니다.</div>
+
+      <h2>FOIS 지연원인</h2>
+      <form id="fois-form">
+        <div class="field">
+          <label for="fois-direction">구분</label>
+          <select id="fois-direction">
+            <option value="dep">출발</option>
+            <option value="arr">도착</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fois-airport">공항 ICAO (선택)</label>
+          <input id="fois-airport" type="text" maxlength="4" placeholder="예: RKSI" />
+        </div>
+        <div class="field fois-date-range">
+          <label for="fois-date-from">기간 (선택)</label>
+          <input id="fois-date-from" type="date" />
+          <span aria-hidden="true">~</span>
+          <input id="fois-date-to" type="date" />
+        </div>
+        <button id="fois-search-btn" type="submit">조회</button>
+      </form>
+      <p id="fois-summary" class="muted"></p>
+      <ol id="fois-causes" class="fois-causes"></ol>
+      <p id="fois-error" class="error" hidden></p>
     </section>
   </main>
 

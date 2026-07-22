@@ -1,13 +1,15 @@
 /**
  * 부트스트랩 (docs/04-frontend-migration.md §3.1 초기 부트 순서, F1~F10 결선).
  */
-import { loadConfig, getConfig } from "./config.js";
+import { loadConfig } from "./config.js";
 import { getState, subscribe, bootMinimal } from "./store.js";
+import { escapeHtml } from "./html.js";
 import { createReferenceLayers } from "./layers/reference.js";
 import { createRouteLayers } from "./layers/route.js";
 import { createAdsbLayer } from "./layers/adsb.js";
 import { bindAirportWeatherButtons } from "./weather.js";
 import { initRoutePanel } from "./route-panel.js";
+import { initFoisPanel } from "./fois-panel.js";
 import { initViewModeToggle } from "./viewmode.js";
 import { initMinimap } from "./minimap.js";
 
@@ -38,7 +40,9 @@ function renderFirChain(routeResult, selectedIndex) {
   }
   el.classList.remove("muted");
   const opt = routeResult.options[selectedIndex];
-  el.innerHTML = opt.enrouteFirs.map((icao) => `<span class="fir-badge">${icao}</span>`).join('<span aria-hidden="true">→</span>');
+  el.innerHTML = opt.enrouteFirs
+    .map((icao) => `<span class="fir-badge">${escapeHtml(icao)}</span>`)
+    .join('<span aria-hidden="true">→</span>');
 }
 
 function updateCounts(state) {
@@ -84,6 +88,7 @@ async function main() {
 
   bindAirportWeatherButtons(map);
   initRoutePanel();
+  initFoisPanel();
   initMinimap(map, CONFIG);
 
   function fitToSelectedRoute() {

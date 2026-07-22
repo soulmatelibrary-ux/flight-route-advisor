@@ -69,6 +69,18 @@ export function toRouteOption(o) {
  * 현재 렌더 코드는 toRouteOption()의 키 기반 객체를 쓰므로 이 함수는 스토어 소비용이
  * 아니라 규약 문서화·향후 원본 로직 이식 시 호환을 위한 것이다.
  */
+/** /api/fois/delays 응답의 원인 집계 1건 → 내부에서 쓰는 camelCase 형태(F3 어댑터 규약). */
+export function toFoisCause(c) {
+  return {
+    causeMajor: c.cause_major,
+    causeMinor: c.cause_minor,
+    causeProcess: c.cause_process,
+    involvedParty: c.involved_party,
+    reason: c.reason,
+    count: c.count,
+  };
+}
+
 export function toOptArray(o) {
   const flatten = (pairs) => pairs.flat();
   return [

@@ -3,21 +3,35 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
+from app.db.session import get_engine
 from app.envelope import error_envelope
 from app.middleware import RateLimitMiddleware, RequestLoggingMiddleware
-from app.routers import reference, routes
+from app.routers import fois, reference, routes
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="flight-route-advisor API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """앱 시작·종료 훅. DB 연결풀 리소스 정리(docs/06-conventions.md §8 defense-in-depth)."""
+    yield
+    # 앱 종료 시 cleanup
+    engine = get_engine()
+    if engine:
+        engine.dispose()
+
+
+app = FastAPI(title="flight-route-advisor API", lifespan=lifespan)
 
 app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.rate_limit_per_minute)
 app.add_middleware(RequestLoggingMiddleware)
@@ -60,3 +74,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.include_router(reference.router)
 app.include_router(routes.router)
+app.include_router(fois.router)
+
+# 프론트(frontend/) 동일 오리진 서빙(완료검증 §D-4, 2026-07-22) — "/api/*"는 위 라우터가
+# 먼저 매치되므로 이 마운트("/")는 그 외 경로(정적 파일·SPA index.html)만 담당한다.
+# frontend_dir이 없으면(선택 기능) 조용히 건너뛴다 — backend 단독 기동(API 전용)도 계속
+# 지원해야 하므로 필수 요건으로 만들지 않는다.
+if settings.frontend_dir is not None:
+    app.mount("/", StaticFiles(directory=str(settings.frontend_dir), html=True), name="frontend")

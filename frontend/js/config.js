@@ -20,10 +20,17 @@ const DEFAULT_CONFIG = {
       [-78, -400],
       [85, 400],
     ],
+    // "지역 컨텍스트" 뷰모드(F9)의 fitBounds 범위 — 인천 FIR 인접 권역 근사(단순화,
+    // docs/07-checklist.md Stage2 동기화). 하드코딩 금지 원칙상 viewmode.js가 아니라
+    // 여기 config에 둔다.
+    regionContextBounds: [
+      [20, 110],
+      [45, 145],
+    ],
   },
   display: {
     waypointLimit: 800,
-    labelZoom: { fir: 3, firKo: 4, tca: 7, airway: 7, fix: 7, airportIcao: 8, navaid: 8, suasWorld: 4 },
+    labelZoom: { fir: 3, firKo: 4, tca: 7, airway: 7, fix: 7, airportIcao: 8, navaid: 8 },
     // 원본 문서(03)는 "저배율은 민간/공용만"만 규정하고 구체적 줌 임계값은 없다(docs/07-checklist.md
     // Stage1 항목이 프론트 연동 시 확정하도록 남긴 갭) — 여기서 5(대륙/월드 뷰)로 확정한다.
     airportFullTypeZoom: 5,
@@ -56,11 +63,6 @@ const DEFAULT_CONFIG = {
       "https://corsproxy.io/?url=",
       "https://api.allorigins.win/raw?url=",
     ],
-  },
-  radar: {
-    indexUrl: "https://api.rainviewer.com/public/weather-maps.json",
-    frameCount: 13,
-    maxNativeZoom: 6,
   },
   externalApis: {},
 };

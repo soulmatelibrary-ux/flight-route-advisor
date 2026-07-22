@@ -57,10 +57,13 @@
 > - `acc-sectors`·`sidstar`·`suas`는 FIR 분석 패널·2단계 기능 전용이라 이번 라운드 대상이 아니다.
 > - `firko`는 **소스 자체가 없다**: `사전빌드_JSON/`에 `firko.json`이 존재하지 않고(원본 HTML에만 내장돼 있을 가능성), 임의로 한글 FIR명을 만들어 넣지 않는다(허위 정보 생성 금지 원칙). 필요해지면 원본 HTML에서 `FIRKO` const 블록만 스크립트로 추출(전체 Read 금지, §6)해 아티팩트로 남길 것.
 > - `zoom`은 파라미터로는 받되(airways/airports/navaids/waypoints), 원본 `문서/03`이 airports "저배율은 민간/공용만" 외에는 구체적 수치 임계값을 규정하지 않아 실제 씨닝 로직은 아직 붙이지 않았다 — 프론트(F5/F9) 연동 시 실사용 줌 레벨을 보고 확정.
+> - **확정(2026-07-22, Stage 2 F5/F9 연동)**: 공항 저배율(민간/공용만) 임계는 `frontend/js/config.js`의 `display.airportFullTypeZoom=5`로 **프론트 클라이언트 측**에서 적용한다(전세계/지역 컨텍스트 모드에서 공항 전량을 한 번 받아 zoom에 따라 표시 그룹만 토글 — 서버 재요청 없음). 서버 쿼리 파라미터 `zoom`은 이번 라운드에서도 씨닝을 적용하지 않은 채로 남겨둔다(요청 파라미터 자체는 받아 검증만 하고 무시) — 항공로/픽스/항행시설의 줌별 반환량 축소(타일화)는 [05-mvp-scope](./05-mvp-scope.md) §3 2단계("참조 지오메트리 타일화")로 이관.
 
 ## 4. 운항·분석 엔드포인트 (DB `processed_*` · 최신본 규약)
 
 > **MVP 범위는 4.1(경로추천)만.** 4.2~4.4(ACDM·FOIS·흐름관리)는 **2단계**([05-mvp-scope](./05-mvp-scope.md) §3)로 이관됨 — Stage 1 산출물 아님. 명세는 2단계 착수 시 참조하도록 미리 남겨둔다.
+>
+> **2026-07-22 2단계 착수**: 4.3(FOIS 지연원인)을 난이도·선행조건이 가장 낮은 항목으로 먼저 구현([05](./05-mvp-scope.md) §3, [07-checklist](./07-checklist.md) "2단계 — FOIS 지연원인 패널"). 4.2·4.4는 여전히 미착수.
 
 ### 4.1 경로추천
 | 엔드포인트 | 설명 | 출처 |
@@ -102,12 +105,31 @@
 }
 ```
 
-### 4.3 지연원인(FOIS) — (2단계)
+### 4.3 지연원인(FOIS) — 구현됨(2단계 착수, 2026-07-22)
 | 엔드포인트 | 설명 | 출처 | 정렬키 |
 |---|---|---|---|
-| `GET /api/fois/delays?airport=&date_from=&date_to=&direction=dep\|arr` | 지연 사유 원인 대/소분류별 집계 | `processed_fois_departure`, `processed_fois_arrival` | `flight_no+dep_date`(출발) / `flight_no+arr_date`(도착) |
+| `GET /api/fois/delays?direction=dep\|arr&airport=&date_from=&date_to=` | 지연 사유 원인 대/소분류별 집계 | `processed_fois_departure`, `processed_fois_arrival` | `flight_no+dep_date`(출발) / `flight_no+arr_date`(도착) |
 
-집계 물리 컬럼: `cause_major, cause_minor, cause_process, involved_party, reason`. 필터: `dep_date`/`arr_date`, `dep_airport`/`arr_airport`.
+집계 물리 컬럼: `cause_major, cause_minor, cause_process, involved_party, reason`(이 5개 조합으로 group by). 필터: `direction`(필수, dep\|arr) · `airport`(선택, ICAO 4자리 — direction별로 `dep_airport`/`arr_airport`에 매칭) · `date_from`/`date_to`(선택, `YYYY-MM-DD` — direction별로 `dep_date`/`arr_date`에 매칭). `date_from > date_to`는 400.
+
+조회는 [02](./02-db-integration.md) §3 "최신본 뷰"(`latest_run.latest_view`)로 일자별 최신 run만 대상. ODR2(§4.1)와 동일한 이유로 `run_id`는 항상 null(날짜별 승자 run이 다를 수 있어 단일 값으로 환원 불가) — 대신 `data_period`는 이번 조회에서 실제로 걸린 날짜의 min/max(결과 0건이면 null).
+
+응답 예:
+```json
+{
+  "data": {
+    "airport": "RKSI",
+    "direction": "dep",
+    "total": 42,
+    "causes": [
+      { "cause_major": "기상", "cause_minor": "강풍", "cause_process": "지상활주", "involved_party": "공항", "reason": "TAILWIND", "count": 12 }
+    ]
+  },
+  "meta": { "source": "processed_fois", "run_id": null, "data_period": "20260101-20260131", "warnings": [] }
+}
+```
+
+프론트: `frontend/js/fois-panel.js`(F6 ROUTE 패널과 독립된 조회 도구, `panel-right`에 배치) + `js/api.js:foisDelays`. store.js 전역 상태에 얹지 않음(뷰모드·OD 선택과 무관).
 
 ### 4.4 흐름관리 (자체 전처리분만) — (2단계)
 | 엔드포인트 | 설명 | 출처 | 정렬키 |

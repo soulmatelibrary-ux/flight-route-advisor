@@ -61,6 +61,10 @@
      /api/* fetch + 기상서버(WEATHER_PROXY_URL) + 외부 API
 ```
 
+### 3.1 통합 실행(개발 편의, 2026-07-22 추가)
+
+각 Stage 코드가 갖춰진 뒤에는(위 순서로 개발 완료 후) 저장소 루트 `./start.sh` 하나로 db+weather(docker compose)·Stage 0(`data-ingestion-backend/start.sh`)·Stage 1(`backend/start.sh`)을 한 번에 띄울 수 있다. Stage 2 프론트는 별도 서버 없이 advisor가 같은 포트("/")에서 동일 오리진으로 서빙한다(완료검증 §D-4, `backend/app/config.py`의 `FRONTEND_DIR`). **프로세스를 하나로 합친 것이 아니라 실행 편의만 묶은 것**이다 — advisor(읽기전용)·ingestion(쓰기) 최소권한 분리는 그대로 유지된다(근거: [../result/backend-integration-review-2026-07-22.md](../result/backend-integration-review-2026-07-22.md)). 개별 Stage만 띄우려면 기존처럼 `data-ingestion-backend/start.sh`·`backend/start.sh`를 각자 실행하면 된다. 이미 실행 중인 포트가 있으면 중복 기동하지 않고, 무관한 프로세스가 포트를 점유 중이면(예: 다른 프로젝트) 크래시 대신 경고만 출력한다.
+
 ### Stage 간 핸드오프 (중요)
 - Stage 1·2는 **Stage 0가 적재한 동일 로컬 pgsql**을 소비한다. Stage 0 적재가 없으면 advisor는 빈 결과다.
 - 개발 초기 데이터가 필요하면 `SOURCE_PROJECT_ROOT/outputs/`의 기존 산출물 또는 원본데이터로 Stage 0를 1회 실행해 시드한다.

@@ -6,11 +6,22 @@
  * 모든 표시 기체에 대해 매 폴링마다 adsbdb를 조회하면 무료 공개 API에 과도한 부하가 되므로
  * 상시 라벨은 편명만, 출도착지는 클릭 시에만 조회(노선 팝업)한다. 인천/대구 ACC 관제량은
  * ACC 섹터 데이터가 필요한 3단계(FIR 분석 패널, docs/07 §향후확장) 소관이라 상태칩에서 제외.
+ *
+ * 보안(리뷰 반영, 2026-07-22): 외부 API가 돌려주는 콜사인/기종/등록기호/노선 코드가
+ * 클릭 없이도(permanent 툴팁) 렌더링되므로 escapeHtml 없이는 XSS 삽입 지점이 된다 —
+ * 모든 외부 문자열은 innerHTML/divIcon html/bindTooltip·bindPopup에 넣기 전 이스케이프한다.
+ *
+ * 원본 05_트러블슈팅.md("ADS-B 전체 실패... 3연속 실패 시 30초 백오프, 마지막 데이터 유지")
+ * 규칙을 그대로 이식: 연속 실패 카운터로 폴링 간격을 30초로 늘리고, 실패해도 기존 마커는
+ * 지우지 않는다(성공 시 즉시 기본 간격 복귀).
  */
 import { createFallbackFetcher } from "../net.js";
+import { escapeHtml } from "../html.js";
 
 const L = window.L;
 const fetchJsonWithFallback = createFallbackFetcher();
+const BACKOFF_THRESHOLD = 3;
+const BACKOFF_INTERVAL_MS = 30000;
 
 function buildPointUrl(template, lat, lon, radiusNm) {
   return template.replace("{lat}", lat.toFixed(2)).replace("{lon}", lon.toFixed(2)).replace("{radiusNm}", String(radiusNm));
@@ -33,11 +44,12 @@ export function createAdsbLayer(map, CONFIG) {
   const group = L.layerGroup();
   const markersByHex = new Map();
   let timer = null;
+  let consecutiveFailures = 0;
 
   function iconFor(track) {
     return L.divIcon({
       className: "aircraft-icon-wrap",
-      html: `<div class="aircraft-icon" style="transform:rotate(${track ?? 0}deg)">&#9992;</div>`,
+      html: `<div class="aircraft-icon" style="transform:rotate(${Number(track) || 0}deg)">&#9992;</div>`,
       iconSize: [16, 16],
       iconAnchor: [8, 8],
     });
@@ -45,31 +57,33 @@ export function createAdsbLayer(map, CONFIG) {
 
   async function showAircraftDetail(marker, ac) {
     const popup = L.popup().setLatLng(marker.getLatLng()).setContent("불러오는 중…").openOn(map);
-    const altText = ac.alt_baro === "ground" ? "지상" : `${ac.alt_baro ?? "-"}ft`;
+    const altText = ac.alt_baro === "ground" ? "지상" : `${escapeHtml(ac.alt_baro ?? "-")}ft`;
     let routeText = "";
     const callsign = ac.flight?.trim();
     if (callsign) {
       try {
         const data = await fetchJsonWithFallback(CONFIG.adsb.callsignLookupUrl.replace("{callsign}", encodeURIComponent(callsign)));
         const route = data?.response?.flightroute;
-        if (route) routeText = `<div>${route.origin?.icao_code ?? "?"} → ${route.destination?.icao_code ?? "?"}</div>`;
+        if (route) {
+          routeText = `<div>${escapeHtml(route.origin?.icao_code ?? "?")} → ${escapeHtml(route.destination?.icao_code ?? "?")}</div>`;
+        }
       } catch {
         // adsbdb 조회 실패 — 노선 정보 없이 나머지 상세만 표시
       }
     }
     popup.setContent(
       `<div class="weather-popup">
-        <div class="headline">${callsign || ac.hex}</div>
-        <div>고도 ${altText} · 지상속도 ${ac.gs ?? "-"}kt · 트랙 ${ac.track ?? "-"}°</div>
+        <div class="headline">${escapeHtml(callsign || ac.hex)}</div>
+        <div>고도 ${altText} · 지상속도 ${escapeHtml(ac.gs ?? "-")}kt · 트랙 ${escapeHtml(ac.track ?? "-")}°</div>
         ${routeText}
-        <div class="muted">${ac.t ?? ""} ${ac.r ?? ""}</div>
+        <div class="muted">${escapeHtml(ac.t ?? "")} ${escapeHtml(ac.r ?? "")}</div>
       </div>`,
     );
   }
 
   function upsert(ac) {
     if (ac.lat == null || ac.lon == null) return;
-    const label = ac.flight?.trim() || ac.hex;
+    const label = escapeHtml(ac.flight?.trim() || ac.hex);
     let marker = markersByHex.get(ac.hex);
     if (!marker) {
       marker = L.marker([ac.lat, ac.lon], { icon: iconFor(ac.track) });
@@ -97,6 +111,7 @@ export function createAdsbLayer(map, CONFIG) {
     try {
       const center = map.getCenter();
       const list = await fetchAircraft(center.lat, center.lng, CONFIG.adsb.radiusNm, CONFIG.adsb.endpoints);
+      consecutiveFailures = 0;
       const seen = new Set();
       for (const ac of list) {
         if (ac.lat != null && ac.lon != null) {
@@ -109,9 +124,23 @@ export function createAdsbLayer(map, CONFIG) {
         const time = new Date().toLocaleTimeString("ko-KR", { hour12: false });
         chipEl.textContent = `ADS-B ${seen.size}대 · ${time}`;
       }
-    } catch {
-      if (chipEl) chipEl.textContent = "ADS-B 조회 실패";
+      rescheduleIfNeeded(chipEl);
+    } catch (err) {
+      consecutiveFailures += 1;
+      // 마지막으로 받은 데이터(마커)는 그대로 유지 — 실패라고 지도를 비우지 않는다(05_트러블슈팅.md).
+      if (chipEl) chipEl.textContent = `ADS-B 조회 실패(${consecutiveFailures}회) — ${err.message ?? "알 수 없는 오류"}`;
+      rescheduleIfNeeded(chipEl);
     }
+  }
+
+  function currentIntervalMs() {
+    return consecutiveFailures >= BACKOFF_THRESHOLD ? BACKOFF_INTERVAL_MS : CONFIG.adsb.pollMs;
+  }
+
+  function rescheduleIfNeeded(chipEl) {
+    if (!timer) return; // stop() 이후에는 재예약하지 않음
+    clearInterval(timer);
+    timer = setInterval(() => poll(chipEl), currentIntervalMs());
   }
 
   function start(chipEl) {

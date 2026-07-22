@@ -8,11 +8,6 @@
  */
 import { setViewMode, getState } from "./store.js";
 
-const REGION_CONTEXT_BBOX = [
-  [20, 110],
-  [45, 145],
-]; // 인천 FIR 인접 권역 근사
-
 // 레이어 표시/숨김 자체는 main.js가 store 구독(renderForCurrentState)으로 처리한다 —
 // 이 모듈은 지도 뷰(중심/줌/fitBounds)와 토글 버튼 상태만 맡는다.
 export function initViewModeToggle(map, CONFIG, { onFocusEnter } = {}) {
@@ -46,7 +41,7 @@ export function initViewModeToggle(map, CONFIG, { onFocusEnter } = {}) {
       const fit = onFocusEnter?.();
       if (!fit) map.setView(CONFIG.map.center, CONFIG.map.zoom);
     } else if (mode === "region") {
-      map.fitBounds(REGION_CONTEXT_BBOX);
+      map.fitBounds(CONFIG.map.regionContextBounds);
     } else {
       map.setView(CONFIG.map.center, CONFIG.map.zoom);
     }

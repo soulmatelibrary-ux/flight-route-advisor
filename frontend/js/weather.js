@@ -6,6 +6,7 @@
  */
 import { getConfig } from "./config.js";
 import { createFallbackFetcher } from "./net.js";
+import { escapeHtml } from "./html.js";
 
 const fetchJsonWithFallback = createFallbackFetcher();
 
@@ -146,19 +147,22 @@ function ceilLineValue(clouds) {
   return c ? c.base : null;
 }
 
+// 이 아래(tafHtml, renderAirportWeatherInto)는 innerHTML 삽입 경계다 — decodeMetar/
+// buildTafTimeline이 반환하는 값은 METAR/TAF rawOb/rawTAF/wxString 등 외부 API 원문을
+// 그대로 담고 있으므로, 여기서 반드시 escapeHtml을 거친다(리뷰 지적사항, 2026-07-22).
 function tafHtml(taf) {
   const rows = buildTafTimeline(taf.fcsts);
   const rowsHtml = rows
     .map(
       (r) => `<div class="taf-row${r.tempo ? " tempo" : ""}">
-        <span>${kst(r.timeFrom)}</span>
-        <span>${r.change}${r.prob ? ` PROB${r.prob}` : ""}</span>
-        <span${/LIFR|IFR/.test(r.category ?? "") ? ' class="risk"' : ""}>${r.category ?? ""}</span>
-        ${r.wxString ? `<span class="risk">${r.wxString}</span>` : ""}
+        <span>${escapeHtml(kst(r.timeFrom))}</span>
+        <span>${escapeHtml(r.change)}${r.prob ? ` PROB${escapeHtml(r.prob)}` : ""}</span>
+        <span${/LIFR|IFR/.test(r.category ?? "") ? ' class="risk"' : ""}>${escapeHtml(r.category ?? "")}</span>
+        ${r.wxString ? `<span class="risk">${escapeHtml(r.wxString)}</span>` : ""}
       </div>`,
     )
     .join("");
-  return `<details><summary>예보 추이 (TAF)</summary>${rowsHtml}<details><summary>TAF 원문</summary>${taf.rawTAF ?? ""}</details></details>`;
+  return `<details><summary>예보 추이 (TAF)</summary>${rowsHtml}<details><summary>TAF 원문</summary>${escapeHtml(taf.rawTAF ?? "")}</details></details>`;
 }
 
 /** 공항 클릭 → "공항 기상" 버튼 → 팝업(docs/03 §공항 기상 팝업). */
@@ -171,8 +175,8 @@ export async function renderAirportWeatherInto(container, icao) {
       container.textContent = `METAR 없음: ${icao} (관측 미실시 공항일 수 있음)`;
       return;
     }
-    const lines = decodeMetar(m);
-    const risks = riskOf(m);
+    const lines = decodeMetar(m).map(escapeHtml);
+    const risks = riskOf(m).map(escapeHtml);
     const taf = tafs[0];
     container.innerHTML = `
       <div class="headline">${lines[0]}</div>
@@ -185,7 +189,7 @@ export async function renderAirportWeatherInto(container, icao) {
       ${taf ? tafHtml(taf) : ""}
     `;
   } catch (err) {
-    container.innerHTML = `<div class="error">기상 조회 실패: ${err.message}</div>`;
+    container.innerHTML = `<div class="error">기상 조회 실패: ${escapeHtml(err.message)}</div>`;
   }
 }
 

@@ -1,9 +1,9 @@
 # flight-route-advisor
 
-- 문서 버전: 1.1
-- 작성일: 2026-07-21
+- 문서 버전: 1.2
+- 작성일: 2026-07-22
 
-항공 **비행경로추천 웹서비스**의 풀스택 개발 저장소다. 데이터 **생산(적재)**과 **소비(서비스)**의 설계 문서를 한곳에 모아, 문서만 읽고 바로 개발에 착수할 수 있게 한다. (현재 단계: 기획·설계 — 코드 구현 없음)
+항공 **비행경로추천 웹서비스**의 풀스택 개발 저장소다. 데이터 **생산(적재)**과 **소비(서비스)**의 설계 문서를 한곳에 모아, 문서만 읽고 바로 개발에 착수할 수 있게 한다. (현재 단계: **Stage 0→2 구현 완료, 완료검증 통과** — [result/review-2026-07-22.md](result/review-2026-07-22.md))
 
 ## 이 서비스가 하는 일 (한 줄)
 
@@ -49,14 +49,24 @@ flight-route-advisor/
 │   ├── 08-setup-and-dev-order.md  env 루트·로컬 pgsql 기동·순차 순서
 │   ├── 09-review-notes.md         문서 리뷰 로그
 │   └── 10-ui-and-realtime.md      결정 중심 UI 방향 + 향후 실시간 아키텍처
-├── data-ingestion-backend/         전처리 적재 백엔드(생산)
+├── data-ingestion-backend/         전처리 적재 백엔드(생산, Stage 0 — 구현 완료)
 │   ├── _MIRROR.md
 │   ├── docs/                      문서 미러(읽기 전용, README·작업계획서·스킬연동_레퍼런스·DB스키마·기술스택_결정·체크리스트)
-│   └── app/·docker/                Stage 0 신규 코드(착수 시 생성 — 아직 없음)
-├── backend/app/config.py           Stage 1 advisor 설정(Phase 1, env→Settings)
-├── docker/                         docker-compose.yml(db+route-api+weather) · Dockerfile(route-api)
+│   ├── app/                        업로드→적재 API, 요청량 제한, 고착 run 자동 복구
+│   ├── alembic/                     DB 마이그레이션(advisor_readonly role 포함)
+│   └── docker/·start.sh
+├── backend/                        Stage 1 advisor 백엔드(FastAPI, 읽기 전용) — 구현 완료
+│   ├── app/                        config·routers·queries·reference·envelope(공통 에러 포맷)
+│   ├── batch/, tests/
+│   └── start.sh
+├── frontend/                        Stage 2 프론트(vanilla ES module + Leaflet) — 구현 완료
+│   ├── index.html, css/, js/
+│   └── config.json                 (gitignore 대상, config.example.json 참고)
+├── docker/                         docker-compose.yml(db+route-api+weather) · Dockerfile(route-api, frontend 동봉)
+├── start.sh                        루트 통합 실행 스크립트(db+weather → Stage 0·1 API; 프론트는
+│                                     별도 서버 없이 backend가 동일 오리진("/")으로 서빙)
 ├── .env.example, config.example.json  환경변수·프론트 런타임 config 예시
-└── frontend/                       Stage 2 프론트(착수 시 생성 — 아직 없음)
+└── result/                          완료검증 리포트(review-2026-07-22.md 등)
 ```
 
 ---
@@ -104,7 +114,7 @@ flight-route-advisor/
 
 ## 현재 상태
 
-- 설계 문서 단계 완료: 서비스 docs/00~10 작성(3회차 리뷰 반영, [docs/09-review-notes.md](docs/09-review-notes.md)), 적재 백엔드 문서 미러 완료.
-- **Phase 1(로컬 환경) 착수됨**: `backend/app/config.py`(env→Settings), `docker/{docker-compose.yml,Dockerfile}`, `.env.example`, `config.example.json`, `.gitignore`/`.dockerignore` 존재. 로컬 `db`(postgres:16) 컨테이너 기동·접속 스모크 완료([docs/07-checklist.md](docs/07-checklist.md) Phase 1).
-- Stage 0/1/2 실제 로직(`data-ingestion-backend/app`·`backend/app`의 라우터·쿼리·`frontend/`)은 아직 착수 전 — [docs/05-mvp-scope.md](docs/05-mvp-scope.md) §1 구조대로 순서에 따라 생성.
-- 개발 착수 전 잔여 선행조건: 전처리 측 **통합데이터/영향상세 테이블**(3단계 기능용). 물리 컬럼 매핑은 [DB스키마 §9](data-ingestion-backend/docs/DB스키마.md)로 **확정됨**.
+- **Stage 0(적재)·Stage 1(advisor 백엔드)·Stage 2(프론트) 구현 완료.** 순서대로 개발되었고 각 단계 완료 시 리뷰에이전트 게이트(기능·논리·예외·보안)를 통과했다([docs/07-checklist.md](docs/07-checklist.md)).
+- **개발 완료 검증 통과**: 초기 설계 문서(docs/02·03·04·05·07) 대비 구현 대조 리뷰를 완료했고, 발견된 불일치·미구현 항목은 사용자 확인을 거쳐 처리했다([result/review-2026-07-22.md](result/review-2026-07-22.md)). 기상 레이더·SIGMET/PIREP·경유 FIR 심각도 표시는 2단계 로드맵으로 이관([docs/05-mvp-scope.md](docs/05-mvp-scope.md) §3, [docs/10-ui-and-realtime.md](docs/10-ui-and-realtime.md) §2.5).
+- **로컬 실행**: 루트 `.env`를 채운 뒤 `./start.sh` 하나로 db+weather(docker compose)·Stage 0·Stage 1이 뜨고, 프론트는 Stage 1(advisor)이 동일 오리진("/")으로 정적 서빙한다. 개별 Stage만 띄우려면 `data-ingestion-backend/start.sh`·`backend/start.sh`를 각자 실행한다. 상세 순서는 [docs/08-setup-and-dev-order.md](docs/08-setup-and-dev-order.md).
+- 3단계(경로영향 상세) 기능을 위한 전처리 측 **통합데이터/영향상세 테이블**은 아직 선행조건 — 물리 컬럼 매핑은 [DB스키마 §9](data-ingestion-backend/docs/DB스키마.md)로 확정돼 있다.

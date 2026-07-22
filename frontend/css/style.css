@@ -60,9 +60,18 @@ html, body {
 
 .field { margin-bottom: 10px; }
 .field label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 2px; }
-.field select { width: 100%; padding: 6px; font-family: inherit; }
+.field select, .field input[type="text"] { width: 100%; padding: 6px; font-family: inherit; }
+.field.fois-date-range { display: flex; align-items: center; gap: 6px; }
+.field.fois-date-range input[type="date"] { flex: 1; padding: 6px; font-family: inherit; }
 
 .briefing { font-size: 12px; margin-bottom: 8px; color: var(--ink-soft); white-space: pre-line; }
+
+.fois-causes { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fois-causes li {
+  border: 1px solid rgba(34,48,60,0.15); border-radius: 6px; padding: 8px; font-size: 12px;
+}
+.fois-causes li .row1 { font-weight: 600; }
+.fois-causes li .row2 { color: var(--ink-soft); margin-top: 2px; }
 
 .route-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .route-options li {

@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# 프론트 런타임 config 로컬 오버라이드(docs/06-conventions.md §1.2 — config.example.json만 커밋)
+frontend/config.json
+
 # 참조 지오메트리 빌드 산출물(빌드 시 재생성)
 backend/app/reference/artifacts/
 

@@ -36,6 +36,10 @@ from app.config import settings
 from app.db.session import get_engine
 from app.queries.latest_run import latest_view
 
+# --- 외부 자산 경로 상수 (env 기반, docs/CLAUDE.md §0.1) ---
+_REFERENCE_DIR = "사전빌드_JSON"
+_DAFIF_BASE_DIR = "원본데이터/DAFIFT"
+
 # --- 3_agg_csv.py 포팅 (컬럼명만 물리 컬럼으로 치환, docs/02 §4.1) ---
 
 _HEAVY = re.compile(r"^(A33|A34|A35|A38|B74|B76|B77|B78|MD1|IL7|K35)")
@@ -133,8 +137,16 @@ def aggregate(rows: list[dict[str, Any]]) -> tuple[dict, dict]:
 
 
 def _load_dafif_lookups(porting_root: Path) -> tuple[dict[str, list[tuple[float, float]]], dict[str, tuple[float, float]]]:
-    """WPT.TXT + NAV.TXT → ident별 후보 좌표 목록, ARPT.TXT → 공항 좌표. 원본 그대로."""
-    base = porting_root / "원본데이터" / "DAFIFT"
+    """WPT.TXT + NAV.TXT → ident별 후보 좌표 목록, ARPT.TXT → 공항 좌표. 원본 그대로 (경로 상수화, docs/CLAUDE.md §0.1)."""
+    base = porting_root / _DAFIF_BASE_DIR
+    # 필수 파일 존재 확인
+    for subdir, filename in [("WPT", "WPT.TXT"), ("NAV", "NAV.TXT"), ("ARPT", "ARPT.TXT")]:
+        file_path = base / subdir / filename
+        if not file_path.exists():
+            raise FileNotFoundError(
+                f"DAFIF {filename} 누락: {file_path} "
+                "(PORTING_PACKAGE_ROOT 경로 확인, docs/08-setup-and-dev-order.md §1)"
+            )
     lookup: dict[str, list[tuple[float, float]]] = {}
     with (base / "WPT" / "WPT.TXT").open(encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f, delimiter="\t"):
@@ -335,8 +347,11 @@ def _fetch_flight_data_rows() -> list[dict[str, Any]]:
     # "원본 파일에 등장한 순서"를 따르도록 한다(원본은 csv.DictReader로 파일 순서대로 읽음).
     # 정렬을 안 하면 DB가 반환하는 순서가 매 실행마다 달라질 수 있어 동률 시 결과가
     # 비결정적이게 된다(실측으로 확인 — 동률 그룹 2건에서 순서가 뒤바뀜, 2026-07-22).
-    with get_engine().connect() as conn:
-        return [dict(row) for row in conn.execute(select(*cols).order_by(sub.c.id)).mappings()]
+    try:
+        with get_engine().connect() as conn:
+            return [dict(row) for row in conn.execute(select(*cols).order_by(sub.c.id)).mappings()]
+    except Exception as exc:
+        raise RuntimeError(f"processed_flight_data 조회 실패: {exc}") from exc
 
 
 def _data_period(rows: list[dict[str, Any]]) -> str | None:
@@ -358,9 +373,18 @@ def run(output_path: Path | None = None) -> dict:
     data_period = _data_period(rows)
     agg, votes = aggregate(rows)
 
-    firs_path = settings.porting_package_root / "사전빌드_JSON" / "firs.json"
-    with firs_path.open(encoding="utf-8") as f:
-        fir_set = {row[0] for row in json.load(f)}
+    # FIR 아티팩트 로드 (경로 상수화, 파일 검증 추가)
+    try:
+        firs_path = settings.porting_package_root / _REFERENCE_DIR / "firs.json"
+        if not firs_path.exists():
+            raise FileNotFoundError(
+                f"FIR 아티팩트 누락: {firs_path} "
+                "(PORTING_PACKAGE_ROOT/사전빌드_JSON 경로 확인, docs/08-setup-and-dev-order.md §1)"
+            )
+        with firs_path.open(encoding="utf-8") as f:
+            fir_set = {row[0] for row in json.load(f)}
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"FIR 데이터 로드 실패: {exc}") from exc
 
     lookup, apc = _load_dafif_lookups(settings.porting_package_root)
     odr2 = build_odr2(agg, votes, fir_set, lookup, apc)

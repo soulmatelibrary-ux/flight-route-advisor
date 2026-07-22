@@ -101,8 +101,9 @@ flight-route-advisor/
 | 경로 기하 동적 재계산(FIR 경유 면·게이트) | 04-D buildGeo | 참조 FIR 지오메트리 | 상 |
 | 상층풍·시어 오버레이(FL별 색) | 04-E, Open-Meteo | 외부 API, 세그먼트 표본 | 중 |
 | 공항 운항 KPI 패널 | ACDM | `/api/airports/{icao}/ops`(B), `processed_acdm_*` | 중 |
-| FOIS 지연원인 패널 | FOIS | `processed_fois_*` | 하 |
+| FOIS 지연원인 패널 — **구현 완료(2026-07-22)** | FOIS | `processed_fois_*` | 하 |
 | 흐름관리 조회(자체 전처리분, 비행편 영향 미결합) | `03 §4.4` | `/api/flow-management`(B), `processed_flow_management` | 하 |
+| 기상 레이더(RainViewer 토글+재생바)·경유 FIR 심각도 틴트·SIGMET/PIREP 경고 | [10 §2.5](./10-ui-and-realtime.md) 레이어③④⑤ | 없음(기존 기상서버·RainViewer 그대로) — 2026-07-22 완료검증에서 MVP 표기 대비 F1~F10 작업분해 누락 발견, 2단계로 재분류 | 하~중 |
 | 참조 지오메트리 타일화(뷰포트 스트리밍) | 01 §4 | 프론트 렌더 일부 재작성 | 상 |
 
 ### 3단계 — 실시간·분석

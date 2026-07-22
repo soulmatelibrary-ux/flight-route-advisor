@@ -79,22 +79,48 @@
 
 > 근거: [04](./04-frontend-migration.md). 원본 기능/알고리즘·기상서버·완성본은 `PORTING_PACKAGE_ROOT`(env).
 
-- [ ] F1 모듈 분리 + `js/config.js`(설정 주도)
-- [ ] F2 `js/api.js`, F3 `js/adapters.js`(키↔08 배열), F4 `js/store.js`(파생 상수)
-- [ ] F5 참조 레이어 6종 fetch 렌더(04-A 사전투영 보존), **결정 포커스 기본 + 전세계 온디맨드**([04 §3.1](./04-frontend-migration.md), [10 §2](./10-ui-and-realtime.md))
-- [ ] F6 ROUTE 패널(`/api/routes`), F7 공항 기상(기존 프록시 폴백), F8 실시간 ADS-B
-- [ ] F9 뷰모드 토글 3종(결정 포커스/지역 컨텍스트/전세계), F10 미니맵([10 §2.1·§2.3](./10-ui-and-realtime.md))
-- [ ] 완성본 HTML 정답지와 **전세계 모드**에서 시각 회귀 비교(직접 Read 금지)
-- [ ] 공통 게이트 통과
+- [x] F1 모듈 분리 + `js/config.js`(설정 주도) — `frontend/index.html`+`css/style.css`+`js/config.js`. `DEFAULT_CONFIG`(URL·줌 임계·표시상한·디자인 토큰 전부 여기 하나) + `frontend/config.json`(git 미추적, `.env`와 동일 패턴) fetch 오버레이. 루트 `config.example.json`을 실제 `DEFAULT_CONFIG`와 동기화(단일 진실원)
+- [x] F2 `js/api.js`(baseURL·in-flight 중복요청 합침·`ApiError`) — F3 `js/adapters.js` — F4 `js/store.js`(구독형 상태, 파생 상수 `firByIcao`/`airportByIcao`). **F3 결정 로그**: 원본 렌더 소스 자체가 저장소에 없어(15MB, 열람 금지·정답지 전용) "기존 코드 재사용" 전제가 성립하지 않으므로 04 §4.1 대안 중 키 기반 신규 작성을 택함(docs/04-frontend-migration.md §4.1에 동기화). ODR2만 `toOptArray()`로 08 배열 형태도 병행 제공
+- [x] F5 참조 레이어 6종(FIR/TCA/항공로/픽스/공항/항행시설) fetch 렌더, **결정 포커스 기본 + 전세계 온디맨드**([04 §3.1](./04-frontend-migration.md), [10 §2](./10-ui-and-realtime.md)) — `js/layers/reference.js`. 04-F(겹침 폴리곤 채움) 이식: Leaflet Canvas 기본 `fillRule:'evenodd'`가 겹치는 FIR 멀티폴리곤을 상쇄시키는 것을 실측 확인(`firs.json` 247개 중 SBAO/SBBS/SBCW/UEEE/UWWW 등 mixed-winding 실재 확인) → `fillRule:'nonzero'`+멀티폴리곤 단일 L.polygon 패스+shoelace 링 방향 통일로 수정. 공항 저배율(민간/공용만) 임계는 문서가 구체값을 안 줘 Stage1이 남긴 갭([03 §3](./03-backend-api.md) 각주 갱신)을 여기서 `airportFullTypeZoom=5`로 확정
+- [x] F6 ROUTE 패널(`js/route-panel.js`+`js/layers/route.js`, `/api/routes`) — 출발(편수순)→도착 select, 브리핑, 옵션 목록(편수%/평균소요Δ/지연/HEAVY/경유FIR), 전체 겹쳐보기/개별 강조+FIR 면(오렌지 10%, nonzero)+DEP/ARR 배지
+- [x] F7 공항 기상(`js/weather.js`) — 기존 Node 프록시 폴백 체인(직접→로컬→공개 프록시, 성공 경로 기억) 유지, `문서/07_기상MCP서버.md` §3 해독·위험판정 규칙 그대로 이식(`kst`/`decodeMetar`/`riskOf`), TAF 타임라인(BECMG/FM만 기저 갱신, TEMPO/PROB 오버레이) — AWC 실제 TAF/ADS-B JSON 스키마는 WebFetch로 필드명 확인 후 구현(허위 생성 금지 원칙)
+- [x] F8 실시간 ADS-B(`js/layers/adsb.js`) — adsb.lol/adsb.fi/airplanes.live 폴백 폴링(12초, 반경 250NM), 클릭 시 adsbdb 노선 조회. `문서/05_트러블슈팅.md` "3연속 실패 시 30초 백오프·마지막 데이터 유지" 규칙 이식
+- [x] F9 뷰모드 토글 3종(`js/viewmode.js`), F10 미니맵(`js/minimap.js`, [10 §2.1·§2.3](./10-ui-and-realtime.md)) — "지역 컨텍스트"는 FIR 인접 그래프 계산 없이 고정 bbox(`config.map.regionContextBounds`)로 근사(2단계 buildGeo급 인접판정은 MVP 범위 밖)
+- [x] 완성본 HTML 정답지와 **전세계 모드** 회귀 비교(직접 Read 금지, [06 §6·§7](./06-conventions.md)) — 실제 로컬 백엔드(uvicorn)를 기동해 Node 스텁 하네스(DOM 없이 config→api→adapters→store 전체 흐름 + 최소 Leaflet 스텁으로 레이어 렌더 흐름)로 건수 대조: FIR 247·항공로 89,555·공항 10,030·픽스 800(상한, 원본도 동일 상한)·TCA 63·항행시설 8,056·OD 1,487·VHHH→RKSI 옵션 4건 전부 Stage1 기준선과 완전 일치. `node --check` 전체 통과
+- [x] **미구현/축소 스코프(투명하게 남김)**: 기상 레이더(RainViewer)·SIGMET/PIREP 토글([10 §2.5](./10-ui-and-realtime.md) 레이어⑤·④, F1~F10에 대응 작업 없음 — 문서 간 스코프 불일치 발견, 향후 별도 작업으로 추가 필요)·SID/STAR·SUAS·ACC 관제량·상층풍/시어 오버레이·FIR 분석 패널·비행 애니메이션은 2·3단계 소관. 공개 CORS 프록시는 원본 4종 대신 검증 가능한 2종(corsproxy.io/allorigins.win)만 채택(허위 URL 생성 금지 원칙상 미검증 URL 추가 안 함, `config.json`으로 로컬에서 추가 가능)
+- [x] 공통 게이트 통과 — `senior-code-reviewer`가 `frontend/` 전체(config/api/adapters/store/net/weather/route-panel/viewmode/minimap/main.js + layers/{reference,route,adsb}.js) 리뷰. 지적사항 14건 중 실코드 결함 9건 수정 완료(나머지 5건은 문서화된 의도적 축소/스코프 불일치 기록으로 처리):
+  1. **[Critical] ADS-B 상시 라벨 XSS** — 콜사인이 `permanent:true` 툴팁에 이스케이프 없이 렌더돼 클릭 없이도 지도를 보는 모든 사용자에게 실행 가능 → `escapeHtml()`(`js/html.js` 신규) 적용
+  2. **[Critical/High] ADS-B 클릭 상세 팝업 XSS** — 콜사인/기종/등록기호/adsbdb 노선 코드 미이스케이프 → 동일 수정
+  3. **[High] METAR/TAF 원문·wxString XSS** — `weather.js`의 `innerHTML` 삽입 지점 다수 미이스케이프 → `decodeMetar`/`riskOf`/`buildTafTimeline`은 순수 데이터 함수로 유지하고 렌더 경계(`renderAirportWeatherInto`/`tafHtml`)에서만 이스케이프
+  4. **[Medium] 참조 데이터(FIR/TCA/항공로/픽스/항행/공항) popup·tooltip·divIcon 미이스케이프** — `data-weather-icao` 속성 컨텍스트 이탈 가능성 포함 → 전부 이스케이프(정적 사전빌드 데이터라 실위험은 낮지만 방어적 코딩 일관성)
+  5. **[Low] FIR 배지 미이스케이프** — `main.js`도 동일 수정
+  6. **[High] 뷰모드 전환 실패 시 `state.viewMode`가 먼저 바뀌어 렌더 분기가 아예 안 타는 논리 버그** — 벌크 로드 성공 후에만 `state.viewMode` 반영하도록 수정, 합성 실패 시나리오로 재현·수정 확인
+  7. **[Medium] `selectOd` 경쟁 조건**(빠른 연속 선택 시 느린 응답이 최신 선택을 덮어씀) — 요청 세대(generation) 토큰 가드 추가, 인위 지연으로 재현·수정 확인
+  8. **[High] API 에러 파싱 버그** — 백엔드 표준 에러 봉투 `{error:{code,message}}`(이미 구현돼 있었음, `app/envelope.py:error_envelope`)를 프론트가 `body.error`를 문자열로 오인해 `"[object Object]"`로 표시하던 버그 → `body.error?.message` 우선 참조로 수정, 실제 400 응답으로 재현·수정 확인
+  9. **[Medium] ADS-B 폴링에 실패 백오프 없음** — `문서/05_트러블슈팅.md` 규칙(3연속 실패 시 30초 백오프, 마지막 데이터 유지)대로 수정
+  - 문서화 처리(코드 수정 없음): 레이더/SIGMET·PIREP 스코프 갭, 라벨 줌 임계 일부 미사용(→ 오히려 이번에 TCA/픽스/항행/공항ICAO 영구 라벨을 전부 줌게이팅하도록 보강해 해소), `REGION_CONTEXT_BBOX`/웨이포인트 `#fff` 하드코딩(→ `config.js`/`CONFIG.tokens.paper`로 이동해 해소), 공개 프록시 2종 축소(위 스코프 갭 항목에 기록)
+  - 수정 후 재검증: 기존 회귀 스모크(건수 대조) 전부 재통과 + 신규 스모크(에러 파싱·escapeHtml 적용·뷰모드 실패 상태보존·selectOd 경쟁조건) 추가 통과
+
+**Stage 2 완료** — 위 항목 전부 체크 + 공통 게이트 통과.
 
 ---
 
 ## 완료 — result/ 검증
 
-- [ ] `flight-route-advisor/result/`에 초기 문서 대비 구현 대조 리뷰 작성([result/README.md](../result/README.md))
-- [ ] docs/03·04·05·07·02 기능/범위 전부 구현·일치 + 리뷰에이전트 최종 통과(기능·논리·예외·보안)
-- [ ] **불일치 시 사용자에게 설명·처리 질문**(임의 수정 금지)
+- [x] `flight-route-advisor/result/`에 초기 문서 대비 구현 대조 리뷰 작성([result/review-2026-07-22.md](../result/review-2026-07-22.md)) — docs 02·03·04·05 문서대조표(§H) + Stage0~2 통합관점 리뷰(§A~C) + 우선순위 수정 큐(§0)
+- [x] 리뷰에이전트 최종 통과(기능·논리·예외·보안) — cross-stage 신규 발견 13건(Stage0 rate limit/워크스페이스 누수/고착run/--reload, Stage1 500→503/hits누수/bbox nan/regex deprecated, Stage2 뷰모드경쟁/FIR윈딩/ADS-B정리/api.js 캐시회귀) **전부 수정·재검증 완료**(uvicorn 실기동+curl, synthetic DB 트랜잭션, Node 스모크 하네스 5종 재통과). 완전 선택 항목 2건(모듈캐시 스레드경합-양성, 프록시경로 세션간 미persist)만 잔존
+- [x] **불일치 시 사용자에게 설명·처리 질문**(임의 수정 금지) — [result/review-2026-07-22.md §D](../result/review-2026-07-22.md) 6건 전부 사용자 확정 후 처리 완료(rate limit·고착run 코드보완, 레이더/SIGMET-PIREP 2단계 이관 문서화, 프론트 동일 오리진 통합, docs/02 §8 표기 정리, README.md 실제 완료 상태로 갱신). 갱신 중 루트 `start.sh`가 동일 오리진 결정과 어긋나게 프론트를 별도 포트(5173)로 이중 서빙하던 잔여 코드를 발견해 함께 정리(`start.sh`·`.env.example`의 `FRONTEND_PORT`/`FRONTEND_HOST`/`CORS_ALLOWED_ORIGINS` 예시값)
+
+## 2단계 — FOIS 지연원인 패널 (착수, 2026-07-22)
+
+> 근거: [03 §4.3](./03-backend-api.md), [05 §3](./05-mvp-scope.md). 2단계 항목 중 난이도·선행조건이 가장 낮아 최우선 착수(사용자 확정).
+
+- [x] `backend/app/queries/fois.py` — `latest_run.latest_view()` 기반 조회, `direction`(dep\|arr)별 `processed_fois_departure`/`processed_fois_arrival` 선택, `cause_major/cause_minor/cause_process/involved_party/reason` group by + count, `airport`/`date_from`/`date_to` 필터. `data_period`는 필터링된 윈도우의 실제 날짜 min/max(결과 0건이면 null), `run_id`는 ODR2(§4.1)와 동일한 이유로 항상 null.
+- [x] `backend/app/routers/fois.py`(`GET /api/fois/delays`) — `direction` 필수(Query pattern `^(dep|arr)$`), `airport` ICAO 형식 검증(routers/routes.py의 `_validate_icao`와 동일 스타일), `date_from`/`date_to` `YYYY-MM-DD` 정규식 검증 + `date_from>date_to` 400, DB 연결 실패(`OperationalError`/`DBAPIError`) 503. `main.py`에 라우터 등록.
+- [x] 프론트 `js/fois-panel.js` + `js/api.js:foisDelays` — ROUTE 패널(F6)과 달리 뷰모드/OD 선택과 무관한 독립 조회 도구라 `store.js` 전역 상태에 얹지 않고 모듈 내부 세대(seq) 토큰으로 경쟁 조건만 방지(selectOd와 동일 패턴). `index.html` `panel-right`에 마크업 추가(구분 select·공항 input·기간 date range·조회 버튼·결과 목록), `style.css`에 `.fois-causes` 등 스타일 추가. 결과 렌더는 `textContent`만 사용(HTML 삽입 없음 — escapeHtml 불필요, js/layers/*의 innerHTML 경로와 다름).
+- [x] uvicorn 실제 기동 + curl로 필터·에러 케이스 종단 확인: direction 누락/오타 422, airport 형식오류(4자리 비ICAO) 400, airport 길이오류 422(routers/routes.py의 ICAO 검증과 동일하게 Query min/max_length가 먼저 걸림), date 형식오류 400, date_from>date_to 400, 정상 조회(direction=arr&airport=RKSI&기간필터) 응답 확인 — `airport=null,total=8893`(무필터)·`RKSI 2026-01`(4,481건·144종 원인조합), `meta.data_period`가 필터링된 실제 날짜 범위로 정확히 채워짐, `run_id`는 의도대로 null
+- [x] 공통 게이트(하드코딩·시큐어코딩·리뷰에이전트) 통과 — `senior-code-reviewer`가 8개 변경 파일 전부(백엔드 3·프론트 5) + 의존 파일(latest_run/column_map/tables/session/envelope/routes.py/adapters/store.js) 리뷰. Critical/High 없음, Low 3건 전부 수정 확인: ① `frontend/js/fois-panel.js`가 다른 모든 API 소비 코드와 달리 `adapters.js`의 `toX()` 어댑터를 안 쓰고 원본 snake_case를 직접 읽던 것 → `adapters.js`에 `toFoisCause()` 추가해 통일 ② `backend/app/routers/fois.py`의 날짜 검증이 자릿수 모양만 보고 `2026-13-99` 같은 존재하지 않는 날짜를 통과시키던 것 → `date.fromisoformat()` 캘린더 검증 추가(재검증: 400 확인) ③ 조회 버튼 클릭에만 걸려있어 Enter 키 제출이 안 되던 것 → `<form>`+submit 이벤트로 전환. SQL 인젝션(바인드 파라미터만 사용)·검증 순서(라우터에서 먼저 검증 후 쿼리 호출)·XSS(textContent만 사용, escapeHtml 불필요 확인)·경쟁조건 가드(store.js의 selectOd와 동일한 compare-after-await 패턴)·빈 결과셋 처리(division-by-zero 없음, period NULL-safe)·미들웨어/CORS 우회 없음 전부 문제없음으로 확인. 성능 최적화(agg/period 쿼리 병합) 1건은 낮은 우선순위 향후 개선으로 남김.
 
 ## 향후 확장 (범위 밖 — 착수 시 별도 체크리스트)
-- [ ] 2단계: 경로 기하 동적(04-D)·상층풍/시어(04-E)·참조 타일화·공항 운항 KPI(ACDM, `/api/airports/{icao}/ops`)·지연원인(FOIS, `/api/fois/delays`)·흐름관리 조회(자체 전처리분, `/api/flow-management`)
+- [ ] 2단계 잔여: 경로 기하 동적(04-D)·상층풍/시어(04-E)·참조 타일화·공항 운항 KPI(ACDM, `/api/airports/{icao}/ops`)·흐름관리 조회(자체 전처리분, `/api/flow-management`)·기상 레이더(RainViewer)·SIGMET/PIREP 토글
 - [ ] 3단계: 실시간 STCA/CPA·흐름관리 탭(**통합데이터·영향상세 테이블 선행**, 비행편 영향 결합)·FIR 분석 패널
