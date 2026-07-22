@@ -1,9 +1,8 @@
-"""요청량 제한 + 관측성 미들웨어 (docs/06-conventions.md §8, docs/07-checklist.md 공통 게이트).
+"""요청량 제한 + 관측성 미들웨어 (docs/06-conventions.md §8·조직 정책, 2026-07-22 리뷰 B-1).
 
-레이트리밋은 프로세스 내 메모리 카운터다 — 단일 인스턴스 로컬/MVP 배포 전제다.
-여러 인스턴스로 수평 확장하면 인스턴스별로 따로 카운트되어 전체 한도가 느슨해지므로,
-그 시점에는 공유 스토어(Redis 등) 기반으로 교체해야 한다(지금은 과설계 방지 차원에서
-미룬다).
+레이트리밋은 프로세스 내 메모리 카운터다 — 단일 인스턴스 로컬/MVP 배포 전제다(backend/app와
+동일한 트레이드오프, 그쪽 middleware.py 패턴 재사용). 여러 인스턴스로 수평 확장하면 공유
+스토어(Redis 등) 기반으로 교체해야 한다.
 """
 
 from __future__ import annotations
@@ -15,8 +14,6 @@ from collections import defaultdict
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-
-from app.envelope import error_envelope
 
 logger = logging.getLogger("app.request")
 
@@ -40,7 +37,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if len(hits) >= self._limit:
             return JSONResponse(
                 status_code=429,
-                content=error_envelope(429, "요청이 너무 많음 — 잠시 후 다시 시도"),
+                content={"detail": "요청이 너무 많음 — 잠시 후 다시 시도"},
             )
         self._hits[client_ip].append(now)
         return await call_next(request)

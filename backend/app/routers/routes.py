@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,6 +13,10 @@ from app.queries import routes as routes_query
 router = APIRouter(prefix="/api/routes", tags=["routes"])
 
 _ICAO_RE = re.compile(r"^[A-Z]{4}$")
+
+# reference.py와 동일한 매핑(2026-07-22 리뷰 A-1): 아티팩트 손상(JSONDecodeError)·
+# 권한/IO 문제(OSError)도 FileNotFoundError와 함께 503으로 통일한다.
+_ASSET_ERRORS = (FileNotFoundError, OSError, json.JSONDecodeError)
 
 
 def _validate_icao(value: str, field: str) -> str:
@@ -25,9 +30,10 @@ def _validate_icao(value: str, field: str) -> str:
 def get_od_pairs():
     try:
         data = routes_query.od_pairs()
-    except FileNotFoundError as exc:
+        period = routes_query.data_period()
+    except _ASSET_ERRORS as exc:
         raise HTTPException(status_code=503, detail="ODR2 아티팩트가 아직 생성되지 않음") from exc
-    return envelope(data, source="odr2-batch", data_period=routes_query.data_period())
+    return envelope(data, source="odr2-batch", data_period=period)
 
 
 @router.get("")
@@ -39,8 +45,9 @@ def get_routes(
     arr = _validate_icao(arr, "arr")
     try:
         data = routes_query.routes_for(dep, arr)
-    except FileNotFoundError as exc:
+        period = routes_query.data_period()
+    except _ASSET_ERRORS as exc:
         raise HTTPException(status_code=503, detail="ODR2 아티팩트가 아직 생성되지 않음") from exc
     if data is None:
         raise HTTPException(status_code=404, detail=f"OD 쌍을 찾을 수 없음: {dep}|{arr}")
-    return envelope(data, source="odr2-batch", data_period=routes_query.data_period())
+    return envelope(data, source="odr2-batch", data_period=period)

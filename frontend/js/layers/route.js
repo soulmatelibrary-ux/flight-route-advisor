@@ -7,6 +7,8 @@
  * 없는 부가 연출이라 이번 라운드에서는 생략 — 강조선(파랑, 굵게) + 정보 패널의 Δ소요(분)
  * 텍스트로 대체.
  */
+import { normalizeWinding } from "../geo.js";
+
 const L = window.L;
 
 export function createRouteLayers(map, CONFIG) {
@@ -34,7 +36,8 @@ export function createRouteLayers(map, CONFIG) {
     for (const icao of icaoList) {
       const fir = firByIcao.get(icao);
       if (!fir) continue;
-      const rings = fir.polygons.map((ring) => [ring]);
+      // 04-F(겹침 폴리곤 채움) 이식: nonzero만으로는 부족 — reference.js와 동일하게 링 방향 통일
+      const rings = fir.polygons.map((ring) => [normalizeWinding(ring)]);
       L.polygon(rings, {
         fillRule: "nonzero",
         color: CONFIG.tokens.orange,

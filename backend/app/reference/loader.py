@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,8 @@ def _parse_bbox(bbox: str | None) -> tuple[float, float, float, float] | None:
         raise ValueError("bbox 위도는 -90~90 범위여야 함")
     if min_lat > max_lat:
         raise ValueError("bbox minLat은 maxLat보다 클 수 없음")
+    if not (math.isfinite(min_lon) and math.isfinite(max_lon)):
+        raise ValueError("bbox 경도는 유한한 값이어야 함(nan/inf 불가)")
     if min_lon > max_lon:
         # firs.json 등 참조 지오메트리는 날짜변경선 연속화를 위해 경도가 ±360까지
         # 이어져 있다(docs/08 "FR" 절, ±360 보정됨) — 그래서 여기서 경도를 -180~180로

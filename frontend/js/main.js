@@ -140,6 +140,8 @@ async function main() {
 
   const chipEl = document.getElementById("adsb-chip");
   adsb.start(chipEl);
+  // 방어적 정리(향후 SPA 라우팅 전환 대비) — 정적 단일 페이지라 필수는 아니나 폴링 타이머를 명시적으로 멈춘다.
+  window.addEventListener("beforeunload", () => adsb.stop());
 
   try {
     await bootMinimal();

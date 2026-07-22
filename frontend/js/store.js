@@ -91,8 +91,14 @@ async function loadFocusReference(options) {
   }
 }
 
+// selectOd 경쟁 조건 방지(리뷰 지적사항, 2026-07-22): 사용자가 도착지를 빠르게 연속
+// 변경하면 먼저 시작된 요청이 나중에 끝나 최신 선택을 덮어쓸 수 있다 — 세대 토큰으로
+// 자신이 최신 호출이 아니게 된 경우 상태 반영을 건너뛴다.
+let odRequestSeq = 0;
+
 /** OD 선택(§3.1 5번): 옵션 조회 → 경유 FIR/항공로 온디맨드 스코프 로드. */
 export async function selectOd(dep, arr) {
+  const seq = ++odRequestSeq;
   state.dep = dep;
   state.arr = arr;
   state.routeResult = null;
@@ -102,11 +108,14 @@ export async function selectOd(dep, arr) {
   notify({ type: "od:selecting" });
   try {
     const res = await api.routes(dep, arr);
+    if (seq !== odRequestSeq) return; // 더 최신 선택이 진행 중 — 이 응답은 폐기
     const options = res.data.options.map(adapt.toRouteOption);
     state.routeResult = { dep: res.data.dep, arr: res.data.arr, totalFlights: res.data.total_flights, options };
     await loadFocusReference(options);
+    if (seq !== odRequestSeq) return;
     notify({ type: "od:selected" });
   } catch (err) {
+    if (seq !== odRequestSeq) return; // 이미 폐기된 요청의 실패는 무시
     notify({ type: "od:error", message: describeError(err) });
     throw err;
   }
@@ -139,14 +148,29 @@ async function ensureBulkLoaded() {
   for (const a of state.bulk.airports) state.derived.airportByIcao.set(a.icao, a);
 }
 
+// setViewMode 경쟁 조건 방지(리뷰 지적사항, 2026-07-22): 사용자가 뷰모드를 빠르게 전환하면
+// 진행 중인 ensureBulkLoaded()를 취소하고 새 요청을 시작한다(AbortController 패턴).
+let viewModeAbortController = null;
+
 /** 뷰모드 전환(F9): region/world는 전세계 벌크를 온디맨드 로드. */
 export async function setViewMode(mode) {
-  state.viewMode = mode;
+  viewModeAbortController?.abort();  // 진행 중인 요청 취소
+  viewModeAbortController = new AbortController();
+  const signal = viewModeAbortController.signal;
+  
   notify({ type: "viewmode:changing", mode });
   try {
-    if (mode !== "focus") await ensureBulkLoaded();
+    if (mode !== "focus") {
+      await ensureBulkLoaded();
+      if (signal.aborted) return;  // 도중 취소됨 — 상태 반영하지 않음
+    }
+    // 성공한 뒤에만 반영(리뷰 지적사항, 2026-07-22) — 벌크 로드 실패 시 state.viewMode를
+    // 먼저 바꿔버리면 main.js의 renderForCurrentState()가 focus도 bulk도 아닌 상태에
+    // 빠져 참조 레이어가 전혀 갱신되지 않는 버그가 있었다.
+    state.viewMode = mode;
     notify({ type: "viewmode:changed", mode });
   } catch (err) {
+    if (signal.aborted) return;  // 취소된 것 무시
     notify({ type: "viewmode:error", message: describeError(err) });
     throw err;
   }

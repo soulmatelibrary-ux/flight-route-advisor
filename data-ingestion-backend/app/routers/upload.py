@@ -129,6 +129,8 @@ async def _handle_upload(request: Request, background_tasks: BackgroundTasks, fo
             # 이미 만들어진 workspace는 어느 run에도 연결되지 않으므로 정리한다.
             existing = idempotency_key and find_active_run_by_idempotency_key(engine, idempotency_key)
             if existing:
+                if ws is not None:
+                    shutil.rmtree(ws, ignore_errors=True)
                 return RedirectResponse(f"/runs/{existing}", status_code=303)
             raise HTTPException(409, "동일 재시도 키로 처리 중인 요청과 충돌함, 잠시 후 다시 시도") from None
 

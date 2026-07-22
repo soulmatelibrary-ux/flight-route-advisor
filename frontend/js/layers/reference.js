@@ -11,23 +11,15 @@
  * 적용(저비용, 247개)하고 항공로/픽스/공항/항행시설(도합 16.6만+)은 원 세계([-180,180])만
  * 그린다 — 결정 포커스(기본)는 이 범위 밖으로 나갈 일이 없고, 전세계 모드에서 antimeridian
  * 바로 옆으로 패닝하는 경우에만 공백이 생기는 코너케이스로 남긴다.
+ *
+ * 보안(리뷰 반영, 2026-07-22): popup/tooltip/divIcon html은 전부 innerHTML 삽입 경계라
+ * escapeHtml을 거친다 — 이 레이어의 문자열은 사전빌드 참조 데이터라 공급망 오염 외에는
+ * 실시간 변조 경로가 없지만, ADS-B/기상 레이어와 동일한 방어를 일관되게 적용한다.
  */
+import { escapeHtml } from "../html.js";
+import { normalizeWinding } from "../geo.js";
 
 const L = window.L;
-
-function signedArea(ring) {
-  let sum = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const [lat1, lon1] = ring[i];
-    const [lat2, lon2] = ring[(i + 1) % ring.length];
-    sum += lon1 * lat2 - lon2 * lat1;
-  }
-  return sum;
-}
-
-function normalizeWinding(ring) {
-  return signedArea(ring) < 0 ? ring : [...ring].reverse();
-}
 
 function shiftRing(ring, deltaLon) {
   return ring.map(([lat, lon]) => [lat, lon + deltaLon]);
@@ -65,11 +57,11 @@ export function createReferenceLayers(map, CONFIG) {
       });
       layer.on("mouseover", () => layer.setStyle({ fillOpacity: 0.16 }));
       layer.on("mouseout", () => layer.setStyle({ fillOpacity: 0.04 }));
-      layer.bindPopup(`<b>${fir.icao}</b><br>${fir.nameEn}`);
+      layer.bindPopup(`<b>${escapeHtml(fir.icao)}</b><br>${escapeHtml(fir.nameEn)}`);
       layer.addTo(groups.firs);
       if (fir.label) {
         L.marker([fir.label.lat, fir.label.lon], {
-          icon: L.divIcon({ className: "ref-label fir-label", html: fir.icao, iconSize: null }),
+          icon: L.divIcon({ className: "ref-label fir-label", html: escapeHtml(fir.icao), iconSize: null }),
           interactive: false,
         }).addTo(groups.firs);
       }
@@ -87,9 +79,10 @@ export function createReferenceLayers(map, CONFIG) {
         dashArray: "4,4",
         fill: false,
       })
-        .bindTooltip(t.nameKo, { permanent: false })
+        .bindTooltip(escapeHtml(t.nameKo), { permanent: true, direction: "center", className: "ref-label tca-label" })
         .addTo(groups.tca);
     }
+    updateLabelVisibility();
   }
 
   function renderAirways(rows) {
@@ -104,7 +97,7 @@ export function createReferenceLayers(map, CONFIG) {
         labeled.add(aw.ident);
         const mid = [(aw.coords[0][0] + aw.coords[1][0]) / 2, (aw.coords[0][1] + aw.coords[1][1]) / 2];
         L.marker(mid, {
-          icon: L.divIcon({ className: "ref-label airway-label", html: aw.ident, iconSize: null }),
+          icon: L.divIcon({ className: "ref-label airway-label", html: escapeHtml(aw.ident), iconSize: null }),
           interactive: false,
         }).addTo(groups.airways);
       }
@@ -120,12 +113,13 @@ export function createReferenceLayers(map, CONFIG) {
         radius: 3,
         color: CONFIG.tokens.ink,
         weight: 1,
-        fillColor: "#fff",
+        fillColor: CONFIG.tokens.paper,
         fillOpacity: 1,
       })
-        .bindTooltip(wp.ident, { permanent: false })
+        .bindTooltip(escapeHtml(wp.ident), { permanent: true, direction: "top", className: "ref-label wp-label" })
         .addTo(groups.waypoints);
     }
+    updateLabelVisibility();
   }
 
   function renderNavaids(rows) {
@@ -134,9 +128,10 @@ export function createReferenceLayers(map, CONFIG) {
       L.marker(nv.latlng, {
         icon: L.divIcon({ className: "navaid-triangle", iconSize: [10, 10], iconAnchor: [5, 5] }),
       })
-        .bindTooltip(`${nv.ident} ${nv.name} (${nv.type})`)
+        .bindTooltip(escapeHtml(nv.ident), { permanent: true, direction: "right", className: "ref-label nv-label" })
         .addTo(groups.navaids);
     }
+    updateLabelVisibility();
   }
 
   function renderAirports(rows) {
@@ -151,10 +146,15 @@ export function createReferenceLayers(map, CONFIG) {
         weight: 1,
         fillColor: CONFIG.tokens.ink,
         fillOpacity: 0.8,
-      }).bindPopup(`<b>${ap.icao}</b> ${ap.name}<br>고도 ${ap.elevFt}ft<br><button data-weather-icao="${ap.icao}">공항 기상</button>`);
+      })
+        .bindPopup(
+          `<b>${escapeHtml(ap.icao)}</b> ${escapeHtml(ap.name)}<br>고도 ${escapeHtml(ap.elevFt)}ft<br><button data-weather-icao="${escapeHtml(ap.icao)}">공항 기상</button>`,
+        )
+        .bindTooltip(escapeHtml(ap.icao), { permanent: true, direction: "top", className: "ref-label ap-label" });
       marker.addTo(groups.airportsAll);
       if (lowTypes.has(ap.type)) marker.addTo(groups.airportsLow);
     }
+    updateLabelVisibility();
   }
 
   function applyAirportZoomVisibility() {
@@ -174,6 +174,10 @@ export function createReferenceLayers(map, CONFIG) {
     const rules = [
       [".fir-label", CONFIG.display.labelZoom.fir],
       [".airway-label", CONFIG.display.labelZoom.airway],
+      [".tca-label", CONFIG.display.labelZoom.tca],
+      [".wp-label", CONFIG.display.labelZoom.fix],
+      [".nv-label", CONFIG.display.labelZoom.navaid],
+      [".ap-label", CONFIG.display.labelZoom.airportIcao],
     ];
     for (const [selector, threshold] of rules) {
       const show = z >= threshold;

@@ -78,7 +78,11 @@ def get_airports(
     response: Response,
     bbox: str | None = Query(default=None, description="minLat,minLon,maxLat,maxLon"),
     zoom: int | None = Query(default=None, ge=0, le=20),
-    type: str | None = Query(default=None, description="A/B/C/D 콤마 목록"),
+    type: str | None = Query(
+        default=None,
+        pattern=r"^[A-D](,[A-D])*$",
+        description="A/B/C/D 콤마 목록 (라우터 레벨 검증, docs/06-conventions.md §8)",
+    ),
 ):
     try:
         data = loader.load_airports(bbox=bbox, type_filter=type)

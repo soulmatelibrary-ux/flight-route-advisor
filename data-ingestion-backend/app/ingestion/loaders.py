@@ -97,11 +97,29 @@ def find_active_run_by_idempotency_key(engine: Engine, idempotency_key: str) -> 
     return row.id if row else None
 
 
-def has_running_run(engine: Engine) -> bool:
-    """이미 RUNNING인 run이 있는지 확인한다(순차 처리 가드, 기술스택_결정.md §2.6)."""
-    stmt = select(ingestion_runs.c.id).where(ingestion_runs.c.status == "RUNNING").limit(1)
-    with engine.connect() as conn:
-        return conn.execute(stmt).first() is not None
+def recover_interrupted_runs(engine: Engine) -> list[uuid.UUID]:
+    """앱 기동 시 1회 호출한다. run 진행 상태는 프로세스 메모리 `BackgroundTasks`로만
+    관리되므로(pipeline.py), 이전 프로세스가 QUEUED/RUNNING을 남긴 채 죽으면(재시작/OOM)
+    그 run은 영원히 처리중으로 고착되고 삭제도 불가능해진다(terminal 상태만 삭제 가능,
+    `_DELETABLE_STATUSES`). 재개를 시도하지 않고 FAILED로 확정해, 운영자가 원인 확인 후
+    같은 데이터를 재업로드하도록 유도한다(리뷰 2026-07-22 B-3).
+    """
+    with engine.begin() as conn:
+        stale_ids = conn.execute(
+            select(ingestion_runs.c.id).where(ingestion_runs.c.status.in_(("QUEUED", "RUNNING")))
+        ).scalars().all()
+        if stale_ids:
+            conn.execute(
+                update(ingestion_runs)
+                .where(ingestion_runs.c.id.in_(stale_ids))
+                .values(
+                    status="FAILED",
+                    error_code="INTERRUPTED",
+                    error_message="서버 재시작으로 처리가 중단됨(재업로드 필요)",
+                    finished_at=datetime.now(timezone.utc),
+                )
+            )
+    return stale_ids
 
 
 def mark_running(engine: Engine, run_id: uuid.UUID) -> None:

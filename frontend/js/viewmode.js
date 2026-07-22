@@ -26,12 +26,22 @@ export function initViewModeToggle(map, CONFIG, { onFocusEnter } = {}) {
     }
   }
 
+  function setButtonsDisabled(disabled) {
+    for (const b of buttons) b.disabled = disabled;
+  }
+
   async function applyMode(mode) {
+    setButtonsDisabled(true); // 전환 중 중복 클릭 자체를 억제(리뷰 지적사항, 2026-07-22)
     try {
       await setViewMode(mode);
     } catch {
       return; // store가 viewmode:error notify — 상위 구독자가 토스트 처리
+    } finally {
+      setButtonsDisabled(false);
     }
+    // store의 세대 가드가 이 전환을 폐기했을 수 있다 — 그 경우 현재 viewMode는 이미
+    // 더 최신 전환으로 바뀌어 있으므로, 지도/버튼을 이 stale mode로 되돌리지 않는다.
+    if (getState().viewMode !== mode) return;
     if (mode === "focus") {
       const fit = onFocusEnter?.();
       if (!fit) map.setView(CONFIG.map.center, CONFIG.map.zoom);
