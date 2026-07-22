@@ -15,10 +15,13 @@ import threading
 import uuid
 from pathlib import Path
 
+import sqlalchemy as sa
+
 from app.config import settings
+from app.db.models import ingestion_run_files, raw_files
 from app.db.session import get_engine
 from app.ingestion.loaders import LoaderError, add_log, finish_run, load_processed, mark_running
-from app.ingestion.registry import get_descriptor
+from app.ingestion.registry import SkillDescriptor, get_descriptor
 from app.ingestion.skill_runner import SkillExecutionError, parse_result, run_skill, run_validator
 
 logger = logging.getLogger(__name__)
@@ -90,6 +93,8 @@ def _run_ingestion_locked(engine, run_id: uuid.UUID, run_type: str, workspace: P
         # 그대로 기록만 한다.
         validation_summary = parsed.get("validation", {}) if isinstance(parsed.get("validation"), dict) else {}
 
+    _log_exclusions(engine, run_id, descriptor, parsed)
+
     output_paths = {key: parsed[key] for key in descriptor.result.keys if key in parsed}
     try:
         load_processed(engine, descriptor, run_id, output_paths)
@@ -103,3 +108,55 @@ def _run_ingestion_locked(engine, run_id: uuid.UUID, run_type: str, workspace: P
         return
 
     finish_run(engine, run_id, "SUCCESS", output_paths=output_paths, validation_summary=validation_summary)
+
+
+def _log_exclusions(engine, run_id: uuid.UUID, descriptor: SkillDescriptor, parsed: dict) -> None:
+    """스킬이 자체 판단으로 최종 processed 산출물에서 제외한 행(사용자 요청 — raw/processed
+    행수가 다른 이유를 매번 두 테이블을 비교해 알아내지 않아도 run 로그에서 바로 보이게).
+
+    ACDM: 타임라인을 재구성하지 못해 "검토필요"로 표시된 행 — 스킬 stdout의 최종 리포트가
+    이미 입력/출력/제외 행수를 직접 계산해 주므로 그대로 옮긴다(우리가 별도로 재계산하지
+    않음 — 스킬을 블랙박스로 다루는 원칙, docs/06 §5).
+    흐름관리일지: `Seq`가 숫자가 아닌 행(안내문·빈 줄 등)은 스킬이 원본을 읽는 시점에
+    바로 걸러내 stdout 리포트에 "제외 전" 행수가 아예 남지 않는다 — 그래서 우리가 이미
+    적재해 둔 raw_flow_management_rows 행수(원본을 그대로 읽은 값)와 스킬이 보고한
+    이벤트 행수의 차이로 역산한다.
+    """
+    if descriptor.run_type == "acdm":
+        for direction, label in (("departure", "출발"), ("arrival", "도착")):
+            excluded = parsed.get(f"{direction}_excluded_review_rows")
+            if excluded is None:
+                continue
+            input_rows = parsed.get(f"{direction}_input_rows")
+            output_rows = parsed.get(f"{direction}_output_rows")
+            level = "WARN" if excluded else "INFO"
+            add_log(
+                engine, run_id, level, "validation",
+                f"ACDM {label}: 검토필요(타임라인 재구성 불가)로 {excluded}행 제외 "
+                f"(입력 {input_rows} → 처리 {output_rows})",
+            )
+        return
+
+    if descriptor.run_type == "flow_management":
+        event_rows = parsed.get("event_rows")
+        if event_rows is None:
+            return
+        with engine.connect() as conn:
+            raw_total = conn.execute(
+                sa.select(sa.func.coalesce(sa.func.sum(raw_files.c.row_count), 0))
+                .select_from(
+                    ingestion_run_files.join(raw_files, ingestion_run_files.c.raw_file_id == raw_files.c.id)
+                )
+                .where(ingestion_run_files.c.run_id == run_id, raw_files.c.file_type == "flow_management")
+            ).scalar_one()
+        excluded = raw_total - event_rows
+        if excluded < 0:
+            # 전제(원본 행수 >= 이벤트 행수)가 깨진 경우 — 잘못된 숫자를 로그로 남기느니
+            # 조용히 건너뛴다(이 로그는 어디까지나 보조 정보이지 진실의 소스가 아님).
+            return
+        level = "WARN" if excluded else "INFO"
+        add_log(
+            engine, run_id, level, "validation",
+            f"흐름관리일지: Seq가 숫자가 아닌 {excluded}행 제외(안내문/빈 줄 등으로 추정) "
+            f"(원본 {raw_total} → 이벤트 {event_rows})",
+        )

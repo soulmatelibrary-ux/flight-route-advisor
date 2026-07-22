@@ -1,0 +1,131 @@
+/* 디자인 토큰은 js/main.js가 config.js(CONFIG.tokens)를 읽어 :root 커스텀 프로퍼티로 주입한다
+   (docs/06-conventions.md §1.2 "컴포넌트에 #e8590c 같은 리터럴 직접 사용 금지").
+   아래 값은 config 로드 전 깜빡임 방지용 폴백일 뿐 — 실제 값의 단일출처는 config.js다. */
+:root {
+  --ink: #22303c;
+  --ink-soft: #7a8a99;
+  --paper: #fbfbf9;
+  --orange: #e8590c;
+  --blue: #1d5fae;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+#topbar {
+  height: 57px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(34,48,60,0.12);
+  background: var(--paper);
+}
+#app-title { font-size: 16px; margin: 0; white-space: nowrap; }
+.muted { color: var(--ink-soft); font-size: 12px; }
+
+.segmented { display: flex; border: 1px solid var(--ink-soft); border-radius: 6px; overflow: hidden; margin-left: auto; }
+.segmented button {
+  border: none; background: transparent; color: var(--ink); padding: 6px 12px;
+  font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.segmented button.active { background: var(--ink); color: var(--paper); }
+
+.chip {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(34,48,60,0.08);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+#layout {
+  display: grid;
+  grid-template-columns: 280px 1fr 280px;
+  height: calc(100% - 57px);
+}
+
+.panel { overflow-y: auto; padding: 12px; border-right: 1px solid rgba(34,48,60,0.08); }
+#panel-right { border-right: none; border-left: 1px solid rgba(34,48,60,0.08); }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin: 0 0 8px; }
+
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 2px; }
+.field select { width: 100%; padding: 6px; font-family: inherit; }
+
+.briefing { font-size: 12px; margin-bottom: 8px; color: var(--ink-soft); white-space: pre-line; }
+
+.route-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.route-options li {
+  border: 1px solid rgba(34,48,60,0.15); border-radius: 6px; padding: 8px; font-size: 12px; cursor: pointer;
+}
+.route-options li:hover, .route-options li.selected { border-color: var(--orange); }
+.route-options li .row1 { display: flex; justify-content: space-between; font-weight: 600; }
+.route-options li .delta-red { color: #c0392b; }
+.route-options li .row2 { color: var(--ink-soft); margin-top: 2px; }
+
+.error { color: #c0392b; font-size: 12px; }
+
+#map-wrap { position: relative; }
+#map { width: 100%; height: 100%; background: #dfe7ec; }
+#minimap {
+  position: absolute; right: 12px; bottom: 12px; width: 160px; height: 110px;
+  border: 1px solid var(--ink); border-radius: 4px; overflow: hidden; z-index: 500;
+  background: var(--paper);
+}
+
+.fir-chain { display: flex; flex-wrap: wrap; gap: 6px; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+.fir-chain .fir-badge { border: 1px solid var(--ink); border-radius: 4px; padding: 2px 6px; }
+
+.weather-popup { font-size: 12px; max-width: 260px; }
+.weather-popup .headline { font-weight: 700; }
+.weather-popup .risk { color: #c0392b; }
+.weather-popup details { margin-top: 4px; }
+.weather-popup .taf-row { display: flex; gap: 6px; }
+.weather-popup .taf-row.tempo { color: var(--ink-soft); }
+
+#toast-root { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 2000; }
+.toast { background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 6px; font-size: 12px; margin-top: 6px; }
+
+.aircraft-icon { color: #f1c40f; font-size: 14px; text-shadow: 0 0 2px #000; }
+.aircraft-label { font-family: "IBM Plex Mono", monospace; font-size: 10px; white-space: nowrap; }
+
+.ref-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.fir-label { font-weight: 700; }
+.airway-label { color: var(--ink-soft); }
+
+.route-badge {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--paper);
+  background: var(--blue);
+  border-radius: 3px;
+  padding: 1px 4px;
+  transform: translate(-50%, -140%);
+  white-space: nowrap;
+}
+.route-badge.arr { background: var(--orange); }
+
+.navaid-triangle {
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid var(--ink);
+}

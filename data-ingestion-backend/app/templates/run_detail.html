@@ -6,9 +6,11 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{% include "_nav.html" %}
+<nav class="crumbs"><a href="/runs">← 처리 로그 목록</a></nav>
 <h1>run 상세</h1>
-<nav><a href="/runs">목록으로</a></nav>
 
+<div class="card">
 <dl>
 <dt>run_id</dt><dd>{{ run.id }}</dd>
 <dt>유형</dt><dd>{{ run.run_type }}</dd>
@@ -21,34 +23,40 @@
 <dt>삭제자</dt><dd>{{ run.deleted_by or '-' }}</dd>
 {% endif %}
 </dl>
+</div>
 
 {% if run.status in ('SUCCESS', 'VALIDATION_FAILED', 'FAILED') %}
 <h2>삭제(재입력 전 정리)</h2>
+<div class="card">
 <p class="hint">이 run이 적재한 raw/processed 데이터와 아카이브 파일을 지웁니다. run 자체는
 감사 기록으로 남고(상태만 DELETED로 바뀜), 되돌릴 수 없습니다. 같은 데이터를 다시
 올리려면 삭제 후 업로드 폼에서 재업로드하세요.</p>
 <form method="post" action="/runs/{{ run.id }}/delete" onsubmit="return confirm('이 run의 데이터를 정말 삭제할까요? 되돌릴 수 없습니다.');">
   <label>삭제자 <input type="text" name="deleted_by" required placeholder="이름/아이디"></label>
   <label>삭제 토큰 <input type="password" name="admin_token" required placeholder="INGESTION_DELETE_TOKEN"></label>
-  <button type="submit">삭제</button>
+  <button type="submit" class="danger">삭제</button>
 </form>
+</div>
 {% endif %}
 
 <h2>적재 데이터 조회</h2>
+<div class="card">
 {% if data_tables %}
-<ul>
+<ul class="table-list">
 {% for t in data_tables %}
 <li>
   <a href="/runs/{{ run.id }}/data/{{ t }}">{{ t }}</a>
-  · <a href="/runs/{{ run.id }}/data/{{ t }}/download.csv">CSV 다운로드</a>
+  <span><a href="/runs/{{ run.id }}/data/{{ t }}/download.csv" class="btn">CSV 다운로드</a></span>
 </li>
 {% endfor %}
 </ul>
 {% else %}
 <p>조회 가능한 테이블 없음</p>
 {% endif %}
+</div>
 
 <h2>입력 파일</h2>
+<div class="card scroll-x">
 <table>
 <thead><tr><th>파일명</th><th>유형</th><th>행수</th><th>업로드시각</th></tr></thead>
 <tbody>
@@ -59,17 +67,21 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
 
 <h2>검증 요약</h2>
+<div class="card">
 {% if run.validation_summary %}
 <pre>{{ run.validation_summary }}</pre>
 {% else %}
 <p>검증 요약 없음(아직 처리 중이거나 검증 단계 전)</p>
 {% endif %}
+</div>
 
 <h2>산출물 다운로드</h2>
+<div class="card">
 {% if run.output_paths %}
-<ul>
+<ul class="table-list">
 {% for key in run.output_paths.keys() %}
 <li><a href="/runs/{{ run.id }}/download/{{ key }}">{{ key }}</a></li>
 {% endfor %}
@@ -77,8 +89,10 @@
 {% else %}
 <p>아직 산출물 없음</p>
 {% endif %}
+</div>
 
 <h2>로그</h2>
+<div class="card scroll-x">
 <table>
 <thead><tr><th>시각</th><th>레벨</th><th>소스</th><th>메시지</th></tr></thead>
 <tbody>
@@ -89,5 +103,6 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
 </body>
 </html>

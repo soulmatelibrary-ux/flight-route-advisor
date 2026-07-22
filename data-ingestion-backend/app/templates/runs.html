@@ -6,12 +6,13 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{% include "_nav.html" %}
 <h1>처리 로그</h1>
-<nav><a href="/">업로드로 돌아가기</a></nav>
 {% if runs|length >= run_list_limit %}
-<p>최근 {{ run_list_limit }}건만 표시됩니다.</p>
+<p class="hint">최근 {{ run_list_limit }}건만 표시됩니다.</p>
 {% endif %}
 
+<div class="card scroll-x">
 <table>
 <thead>
 <tr><th>run_id</th><th>유형</th><th>상태</th><th>시작</th><th>종료</th></tr>
@@ -30,5 +31,6 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
 </body>
 </html>

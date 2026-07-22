@@ -1,0 +1,5 @@
+<nav class="topnav">
+  <a class="tab{{ ' active' if request.url.path == '/' else '' }}" href="/">업로드</a>
+  <a class="tab{{ ' active' if request.url.path.startswith('/runs') else '' }}" href="/runs">처리 로그</a>
+  <a class="tab{{ ' active' if request.url.path.startswith('/tables') else '' }}" href="/tables">테이블 조회</a>
+</nav>

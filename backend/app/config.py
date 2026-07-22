@@ -118,10 +118,16 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    """환경변수에서 Settings를 생성한다. 실패 시 ConfigError."""
-    database_url = _require_env("DATABASE_URL")
+    """환경변수에서 Settings를 생성한다. 실패 시 ConfigError.
+
+    ADVISOR_DATABASE_URL은 data-ingestion-backend의 DATABASE_URL(쓰기 role)과 별개다.
+    이 서비스는 읽기 전용 role(advisor_readonly, docs/02-db-integration.md §6)로만
+    접속해야 최소권한 원칙(docs/06-conventions.md §3)이 DB 레벨에서도 강제된다 —
+    앱 코드가 SELECT만 issue하는 것만으로는 부족하다(공유 admin 계정 재사용 금지).
+    """
+    database_url = _require_env("ADVISOR_DATABASE_URL")
     if not database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
-        raise ConfigError("DATABASE_URL은 postgresql:// (또는 +psycopg2) 스킴이어야 함")
+        raise ConfigError("ADVISOR_DATABASE_URL은 postgresql:// (또는 +psycopg2) 스킴이어야 함")
 
     return Settings(
         database_url=database_url,

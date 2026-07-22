@@ -30,6 +30,8 @@
 }
 ```
 - 참조 데이터는 `run_id`/`data_period`가 `null`.
+- 경로추천(ODR2, §4.1)은 `data_period`(배치가 실제로 집계한 날짜 범위, `batch/build_odr2.py`가 `odr2_meta.json`에 기록)를 채운다. `run_id`는 null로 둔다 — "일자별 최신 run 우선"(§3.2) 특성상 날짜별로 승자 run이 다를 수 있어 단일 run_id로 환원할 수 없기 때문.
+- 에러 응답은 표준 봉투 `{"error": {"code": "BAD_REQUEST|NOT_FOUND|VALIDATION_ERROR|RATE_LIMITED|SERVICE_UNAVAILABLE|INTERNAL_ERROR", "message": "..."}}` 하나로 통일한다(`app/envelope.py:error_envelope`, `main.py`의 `HTTPException`/`RequestValidationError`/`Exception` 핸들러와 `middleware.py`의 429가 전부 이 함수를 거친다). 라우터가 FastAPI 기본값(`{"detail": ...}`)을 그대로 흘려보내지 않도록 개별 라우터가 아니라 앱 전역에서 재포장한다.
 
 ## 3. 참조 데이터 엔드포인트 (정적 아티팩트 · 장기 캐시)
 
@@ -50,6 +52,11 @@
 
 - `bbox=minLat,minLon,maxLat,maxLon`, `zoom=<int>` — 서버가 줌별 표시 규칙(원본 `03`)을 적용해 반환량을 줄인다.
 - 응답 형태는 키 기반 객체 배열(예 airways: `{ident, seq, a:[lat,lon], b:[lat,lon], upper, lower}`) — 프론트 어댑터가 04-A 사전투영 입력으로 변환.
+
+> **구현 범위(2026-07-22)**: MVP DoD([05](./05-mvp-scope.md) §2.4 "참조 지도 6종")에 필요한 firs·tca·airways·airports·navaids·waypoints만 우선 구현했다.
+> - `acc-sectors`·`sidstar`·`suas`는 FIR 분석 패널·2단계 기능 전용이라 이번 라운드 대상이 아니다.
+> - `firko`는 **소스 자체가 없다**: `사전빌드_JSON/`에 `firko.json`이 존재하지 않고(원본 HTML에만 내장돼 있을 가능성), 임의로 한글 FIR명을 만들어 넣지 않는다(허위 정보 생성 금지 원칙). 필요해지면 원본 HTML에서 `FIRKO` const 블록만 스크립트로 추출(전체 Read 금지, §6)해 아티팩트로 남길 것.
+> - `zoom`은 파라미터로는 받되(airways/airports/navaids/waypoints), 원본 `문서/03`이 airports "저배율은 민간/공용만" 외에는 구체적 수치 임계값을 규정하지 않아 실제 씨닝 로직은 아직 붙이지 않았다 — 프론트(F5/F9) 연동 시 실사용 줌 레벨을 보고 확정.
 
 ## 4. 운항·분석 엔드포인트 (DB `processed_*` · 최신본 규약)
 

@@ -247,7 +247,7 @@ def _read_raw_dataframe_unsafe(descriptor: SkillDescriptor, slot: UploadSlot, up
 
     if descriptor.run_type == "flight_data":
         if suffix == ".csv":
-            return pd.read_csv(uploaded.source_path, encoding="utf-8-sig", **_READ_CSV_KW)
+            return _read_csv_with_encoding_fallback(uploaded.source_path, **_READ_CSV_KW)
         return pd.read_excel(uploaded.source_path, **_READ_CSV_KW)
 
     if descriptor.run_type == "fois":
@@ -261,7 +261,7 @@ def _read_raw_dataframe_unsafe(descriptor: SkillDescriptor, slot: UploadSlot, up
         # 깨지면 열 수 검증이 아니라 값 기반 검증(예: 첫 행이 실제 편명/일자 패턴인지)을
         # 추가해야 한다.
         if suffix == ".csv":
-            df = pd.read_csv(uploaded.source_path, header=None, skiprows=1, encoding="utf-8-sig", **_READ_CSV_KW)
+            df = _read_csv_with_encoding_fallback(uploaded.source_path, header=None, skiprows=1, **_READ_CSV_KW)
         else:
             df = pd.read_excel(uploaded.source_path, header=None, skiprows=1, **_READ_CSV_KW)
         if df.shape[1] != len(FOIS_SOURCE_COLUMNS):
@@ -279,11 +279,39 @@ def _read_raw_dataframe_unsafe(descriptor: SkillDescriptor, slot: UploadSlot, up
 
     if descriptor.run_type == "acdm":
         if suffix == ".csv":
-            # 실측 샘플은 UTF-8이지만, utf-8-sig로 읽으면 BOM 유무와 무관하게 안전하다.
-            return pd.read_csv(uploaded.source_path, encoding="utf-8-sig", **_READ_CSV_KW)
+            return _read_csv_with_encoding_fallback(uploaded.source_path, **_READ_CSV_KW)
         return pd.read_excel(uploaded.source_path, **_READ_CSV_KW)  # .xlsx/.xls(엔진 자동 선택)
 
     raise LoaderError(f"알 수 없는 run_type: {descriptor.run_type!r}")
+
+
+# 코드리뷰 2026-07-21 지적: utf-8-sig 고정이라 국내 레거시 관제 시스템이 흔히 쓰는
+# CP949/EUC-KR로 뽑은 CSV가 새로 연 CSV 업로드 기능 자체에서 전면 실패했다(처음에는
+# FOIS만 수정했으나 4종 CSV 경로 전부 같은 문제라 공통 헬퍼로 통일한다). CP949 바이트열은
+# UTF-8 연속바이트 규칙과 맞지 않아 utf-8-sig 디코딩이 거의 항상 UnicodeDecodeError로
+# 즉시 드러나므로(깨진 문자로 조용히 성공하는 경우는 사실상 없음), 순서대로 시도해 첫
+# 성공을 쓴다.
+_CSV_ENCODING_FALLBACKS = ("utf-8-sig", "cp949")
+
+
+def _read_csv_with_encoding_fallback(path: Path, **read_kwargs: Any) -> pd.DataFrame:
+    df, _encoding = _read_csv_with_encoding_fallback_detect(path, **read_kwargs)
+    return df
+
+
+def _read_csv_with_encoding_fallback_detect(path: Path, **read_kwargs: Any) -> tuple[pd.DataFrame, str]:
+    """인코딩을 순서대로 시도해 첫 성공을 반환한다(성공한 인코딩도 함께 반환 —
+    flow_management처럼 미리보기 읽기와 최종 읽기를 같은 인코딩으로 맞춰야 하는 경우용).
+    """
+    last_exc: UnicodeDecodeError | None = None
+    for encoding in _CSV_ENCODING_FALLBACKS:
+        try:
+            return pd.read_csv(path, encoding=encoding, **read_kwargs), encoding
+        except UnicodeDecodeError as exc:
+            last_exc = exc
+    raise LoaderError(
+        f"CSV 인코딩을 확인할 수 없음(UTF-8/CP949 모두 실패): {path.name!r}"
+    ) from last_exc
 
 
 def _find_flow_management_header_row(preview: pd.DataFrame) -> int | None:
@@ -312,14 +340,15 @@ def _read_flow_management_raw(path: Path) -> pd.DataFrame:
 
 def _read_flow_management_raw_csv(path: Path) -> pd.DataFrame:
     # CSV는 시트 개념이 없으므로 파일 전체를 단일 시트처럼 취급해 동일한 헤더 탐지 규칙을 쓴다.
-    preview = pd.read_csv(
-        path, header=None, nrows=FLOW_MANAGEMENT_HEADER_SCAN_ROWS, dtype=str,
-        keep_default_na=False, encoding="utf-8-sig"
+    # 미리보기 읽기에서 확정된 인코딩을 최종 읽기에도 그대로 써야 한다(둘이 어긋나면
+    # 헤더 위치를 찾은 좌표가 최종 읽기에서는 다른 내용을 가리킬 수 있음).
+    preview, encoding = _read_csv_with_encoding_fallback_detect(
+        path, header=None, nrows=FLOW_MANAGEMENT_HEADER_SCAN_ROWS, dtype=str, keep_default_na=False
     )
     header_row = _find_flow_management_header_row(preview)
     if header_row is None:
         raise LoaderError(f"흐름관리일지 헤더를 찾지 못함(csv): {path.name}")
-    return pd.read_csv(path, header=header_row, encoding="utf-8-sig", **_READ_CSV_KW)
+    return pd.read_csv(path, header=header_row, encoding=encoding, **_READ_CSV_KW)
 
 
 def _build_raw_records(

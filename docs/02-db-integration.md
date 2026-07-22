@@ -59,7 +59,23 @@ FROM processed_flight_data p
 JOIN latest_run r ON p.run_id = r.run_id;
 ```
 - 기간 스냅샷이 필요하면 `finished_at`/데이터 일자(`DATE`, `operation_date` 등) 범위를 추가한다.
-- 여러 run에 걸친 기간(예: 여러 달을 각각 업로드)이라면 "run_type별 최신"이 아니라 **데이터 일자 기준 최신 run 우선**으로 골라야 하므로, 일자별로 가장 최근에 적재된 run을 뽑는 윈도우 질의를 쓴다(구현 시 확정).
+- 여러 run에 걸친 기간(예: 여러 달을 각각 업로드)이라면 "run_type별 최신"이 아니라 **데이터 일자 기준 최신 run 우선**으로 골라야 하므로, 일자별로 가장 최근에 적재된 run을 뽑는 윈도우 질의를 쓴다.
+
+**확정된 정책(2026-07-22)**: 각 `processed_*` 테이블의 날짜 컬럼(`date`/`operation_date`/`dep_date`/`arr_date`/`record_date`) 값별로, 그 값을 포함하는 SUCCESS run들 중 `finished_at`이 가장 늦은 run의 행만 채택한다.
+
+```sql
+-- 일자별 최신 run 우선 윈도우 (다회차 누적 대응)
+WITH ranked AS (
+  SELECT p.*,
+         ROW_NUMBER() OVER (PARTITION BY p.<date_col> ORDER BY r.finished_at DESC) AS rn
+  FROM processed_flight_data p
+  JOIN ingestion_runs r ON p.run_id = r.id
+  WHERE r.run_type = 'flight_data' AND r.status = 'SUCCESS'
+)
+SELECT * FROM ranked WHERE rn = 1;
+```
+- 겹치지 않는 날짜(예: 신규 월 추가)는 그대로 누적되고, 같은 날짜 정정 재업로드는 최신 run이 그 날짜만 통째로 대체한다.
+- `queries/latest_run.py`가 이 윈도우 쿼리를 테이블별 날짜 컬럼(§5 표)에 맞춰 캡슐화하는 단일 출처가 된다(§3.3, DDL 금지 원칙상 DB 뷰 대신 앱 레벨 헬퍼로 처리).
 
 ### 3.3 캡슐화
 - 이 규약을 매 쿼리에 반복하지 않도록, 서비스 측에서 **읽기 전용 뷰**(예: `v_flight_data_current`)로 감싸는 것을 권장한다.
@@ -119,24 +135,32 @@ JOIN latest_run r ON p.run_id = r.run_id;
 
 | 항목 | 로컬 Docker | Supabase |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://readonly:***@db:5432/aviation` | `postgresql://readonly:***@<proj>.supabase.co:5432/postgres` |
+| `ADVISOR_DATABASE_URL` | `postgresql://advisor_readonly:***@db:5432/aviation` | `postgresql://advisor_readonly:***@<proj>.supabase.co:5432/postgres` |
 | SSL | 불필요 | `sslmode=require` |
 | 연결 종류 | direct | 조회 트래픽은 **pooler(pgbouncer)** 권장, 단 prepared statement 제약 유의 |
 | 커넥션 풀 | 여유 | 저가 티어 동시 커넥션 한도 → SQLAlchemy pool 크기 작게 |
 | Role | 읽기 전용 role (`GRANT SELECT`) | 동일. RLS 미사용(전처리 1단계 정책과 일치) |
 
+> **env 변수명(확정, 2026-07-22)**: `ADVISOR_DATABASE_URL`(이 서비스, `advisor_readonly` role)과 data-ingestion-backend의 `DATABASE_URL`(쓰기 role)은 **서로 다른 값이어야 한다**. 같은 값을 공유하면 Stage 0가 재적재를 위해 쓰기 계정을 쓰는 동안 이 서비스도 같은 쓰기 권한을 갖게 되어 최소권한 원칙(§1.2, [06 §3](./06-conventions.md))이 무너진다. `backend/app/config.py`가 `ADVISOR_DATABASE_URL`을 읽는다.
+
+> **Supabase 프로젝트 준비됨(2026-07-22, 미사용 — 기록만)**: 실제 프로젝트 "flight-route-advisor"(`https://aouaqoimieabflyqopvx.supabase.co`) 생성 완료. **Direct connection(IPv6 전용)은 접속 확인 실패**(IPv6 라우팅 안 되는 환경에서 `getaddrinfo` 실패) — **Session pooler(IPv4)로 접속 성공 확인**(`PostgreSQL 17.6`, `aws-0-ap-southeast-1.pooler.supabase.com:5432`, user는 `postgres.<project-ref>` 형식). 저장소 루트 `.env`에 `SUPABASE_PROJECT_URL`/`SUPABASE_PUBLISHABLE_KEY`/`SUPABASE_DB_PASSWORD`/`SUPABASE_POOLER_DATABASE_URL` 4개 값 이미 준비됨(어떤 코드도 아직 참조하지 않음) — 실제 전환 시 이 값을 `session.py`가 읽을 `ADVISOR_DATABASE_URL`/`DATABASE_URL`로 그대로 옮기면 된다. **이후 전환 시 direct connection 대신 pooler를 기본으로 쓸 것**(위 표의 "pooler 권장" 방침과도 일치).
+
 - 연결 로직은 `session.py` 한 곳에 캡슐화해 로컬↔Supabase 전환이 환경변수만으로 되게 한다(전처리 백엔드와 동일 관례).
 - 이 서비스는 마이그레이션을 실행하지 않는다(Alembic은 전처리 백엔드 소유).
-- **최소권한 GRANT (필수, 테이블 명시)**: advisor role에는 `processed_*` 6종에만 SELECT를 부여하고 `raw_*`·`ingestion_*`에는 부여하지 않는다(원본 승무원/등록부호 등 노출 차단). `ALL TABLES` 일괄 GRANT 금지.
+- **최소권한 GRANT (필수, 테이블 명시, 구현 완료)**: role명 `advisor_readonly`(data-ingestion-backend alembic `360c8b394406_*`). `processed_*` 6종은 테이블 전체 SELECT, `ingestion_runs`는 **컬럼 단위** SELECT(`id, run_type, status, finished_at, validation_summary`만 — `9e2a5d7c1b4f_*`, workspace_path/cli_command/error_message 등 서버 내부 정보는 제외). `raw_*`·`ingestion_logs`에는 GRANT 없음. `ALL TABLES` 일괄 GRANT 금지.
   ```sql
-  CREATE ROLE role_advisor_ro LOGIN PASSWORD :pw;
-  GRANT USAGE ON SCHEMA public TO role_advisor_ro;
+  -- 360c8b394406_advisor_readonly_role_grants.py
+  CREATE ROLE advisor_readonly LOGIN PASSWORD :pw;
+  GRANT USAGE ON SCHEMA public TO advisor_readonly;
   GRANT SELECT ON processed_flight_data, processed_acdm_departure, processed_acdm_arrival,
                   processed_fois_departure, processed_fois_arrival, processed_flow_management
-    TO role_advisor_ro;
-  GRANT SELECT ON ingestion_runs TO role_advisor_ro;  -- 최신본 규약(§3)에 필요한 최소 컬럼만
+    TO advisor_readonly;
+  -- 9e2a5d7c1b4f_advisor_readonly_ingestion_runs_grant.py
+  GRANT SELECT (id, run_type, status, finished_at, validation_summary)
+    ON ingestion_runs TO advisor_readonly;
   -- raw_*, ingestion_logs 등에는 GRANT 하지 않는다.
   ```
+  실측 확인(2026-07-22): `advisor_readonly`로 `raw_files` SELECT는 permission denied, `ingestion_runs`의 GRANT 밖 컬럼(`workspace_path` 등) SELECT도 permission denied. `backend/app/db/tables.py`는 SQLAlchemy 리플렉션이 `pg_catalog`를 직접 읽어 GRANT와 무관하게 전체 컬럼명을 반환하는 특성이 있어(실측 확인), `include_columns`로 화이트리스트만 리플렉션하도록 앱 레벨에서 한 번 더 제한한다.
 
 ## 7. 데이터 신선도·정합성
 
@@ -148,5 +172,5 @@ JOIN latest_run r ON p.run_id = r.run_id;
 1. ~~물리 컬럼 별칭~~ → **확정됨**([DB스키마 §9](../data-ingestion-backend/docs/DB스키마.md), §5 반영 완료). 헤더 변경 시에만 재동기화.
 2. 경로추천 집계 방식 확정(MV vs 배치 아티팩트) 및 배치 트리거 방법.
 3. 최신본 뷰를 전처리 DB에 둘지, 앱단 쿼리로 처리할지(권한 정책).
-4. 여러 달 데이터가 각각 다른 run으로 적재될 때 "기간 스냅샷" 선택 규칙(§3.2).
+4. ~~여러 달 데이터가 각각 다른 run으로 적재될 때 "기간 스냅샷" 선택 규칙~~ → **확정됨**(§3.2: 일자별 최신 run 우선 윈도우, 2026-07-22).
 5. 통합데이터/영향상세 테이블 완성 시점 → 흐름관리 영향 기능(3단계) 착수 신호.

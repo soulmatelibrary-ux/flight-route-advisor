@@ -6,20 +6,20 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<h1>{{ table_name }}</h1>
-<nav>
-  <a href="/runs/{{ run_id }}">run 상세로</a>
-  · <a href="/runs/{{ run_id }}/data/{{ table_name }}/download.csv">CSV 전체 다운로드</a>
+{% include "_nav.html" %}
+<nav class="crumbs">
+  <a href="/runs/{{ run_id }}">← run 상세로</a>
+  · <a href="/runs/{{ run_id }}/data/{{ table_name }}/download.csv" class="btn">CSV 전체 다운로드</a>
 </nav>
+<h1>{{ table_name }}</h1>
+<p class="hint">이 run(<code>{{ run_id }}</code>)이 적재한 행만 · 총 {{ total }}행 · {{ page }}/{{ total_pages }} 페이지(페이지당 {{ page_size }}행)</p>
 
-<p class="hint">총 {{ total }}행 · {{ page }}/{{ total_pages }} 페이지 (페이지당 {{ page_size }}행)</p>
-
-<div style="overflow-x: auto;">
+<div class="card scroll-x">
 <table>
 <thead>
 <tr>
 {% if is_raw %}<th>#</th>{% endif %}
-{% for c in columns %}<th>{{ c.logical }}</th>{% endfor %}
+{% for c in columns %}<th title="{{ c.description or c.logical }}">{{ c.logical }}</th>{% endfor %}
 {% if is_raw %}<th>여분 컬럼(extra_columns)</th>{% endif %}
 </tr>
 </thead>
@@ -37,9 +37,9 @@
 </table>
 </div>
 
-<nav>
+<div class="pager">
 {% if page > 1 %}<a href="?page={{ page - 1 }}&page_size={{ page_size }}">← 이전</a>{% endif %}
 {% if page < total_pages %}<a href="?page={{ page + 1 }}&page_size={{ page_size }}">다음 →</a>{% endif %}
-</nav>
+</div>
 </body>
 </html>

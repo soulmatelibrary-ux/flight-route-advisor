@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import hmac
 import io
+import json
 from pathlib import Path
 from typing import Iterator
 from uuid import UUID
@@ -19,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
-from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS
+from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS, COLUMN_DESCRIPTIONS
 from app.db.models import (
     PROCESSED_TABLES,
     RAW_ROW_TABLES,
@@ -127,6 +128,11 @@ def _resolve_run_table(engine, run_id: UUID, table_name: str):
 def run_data(request: Request, run_id: UUID, table_name: str, page: int = 1, page_size: int = _DATA_PAGE_SIZE_DEFAULT) -> HTMLResponse:
     """이 run이 적재한 raw_*_rows/processed_* 실제 행 데이터를 페이지 단위로 보여준다
     (DataGrip 등 외부 DB 클라이언트 없이도 적재 결과를 바로 확인할 수 있게).
+
+    OFFSET 페이지네이션을 그대로 쓴다 — 화면 탐색은 임의 페이지 번호로 건너뛸 수 있어야
+    하고(총 페이지 수 표시 포함) 사람이 실제로 넘기는 깊이도 얕아 OFFSET 비용이 체감되지
+    않는다. 전체 스캔이 실제로 일어나는 download_data_csv(전체 export)만 커서 기반으로
+    바꿨다(코드리뷰 2026-07-21).
     """
     engine = get_engine()
     table, pairs, is_raw = _resolve_run_table(engine, run_id, table_name)
@@ -147,7 +153,13 @@ def run_data(request: Request, run_id: UUID, table_name: str, page: int = 1, pag
         ).mappings().all()
 
     total_pages = max((total + page_size - 1) // page_size, 1)
-    columns = [{"logical": logical, "physical": physical} for logical, physical in pairs]
+    columns = [
+        {
+            "logical": logical,
+            "physical": physical,
+            "description": COLUMN_DESCRIPTIONS.get(physical, "")
+        } for logical, physical in pairs
+    ]
 
     return templates.TemplateResponse(
         "run_data.html",
@@ -184,27 +196,33 @@ def download_data_csv(run_id: UUID, table_name: str) -> StreamingResponse:
         writer.writerow(header)
         yield buf.getvalue()
 
-        offset = 0
-        while True:
-            with engine.connect() as conn:
+        # REPEATABLE READ로 내보내기 전체를 하나의 트랜잭션/커넥션에 묶는다(코드리뷰
+        # 2026-07-21 발견 — 이전에는 청크마다 새 커넥션을 열어, 내보내는 도중 이 run이
+        # 삭제되면(delete_run) 남은 청크가 그냥 빈 결과로 보여 CSV가 조용히 잘려나갔다).
+        # REPEATABLE READ는 트랜잭션 시작 시점 스냅샷을 끝까지 유지하므로 동시 삭제의
+        # 영향을 받지 않는다. 커서 방식(id > last_id)으로 바꿔 페이지가 뒤로 갈수록
+        # OFFSET이 커지는 비용도 함께 없앤다.
+        with engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn, conn.begin():
+            last_id = 0
+            while True:
                 chunk = conn.execute(
                     sa.select(table)
-                    .where(table.c.run_id == run_id)
+                    .where(table.c.run_id == run_id, table.c.id > last_id)
                     .order_by(table.c.id)
                     .limit(_CSV_EXPORT_CHUNK_SIZE)
-                    .offset(offset)
                 ).mappings().all()
-            if not chunk:
-                break
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            for r in chunk:
-                line = ([r["source_row_number"]] if is_raw else []) + [r[c] for c in physical_cols] + (
-                    [r["extra_columns"]] if is_raw else []
-                )
-                writer.writerow(line)
-            yield buf.getvalue()
-            offset += _CSV_EXPORT_CHUNK_SIZE
+                if not chunk:
+                    break
+                buf = io.StringIO()
+                writer = csv.writer(buf)
+                for r in chunk:
+                    extra = json.dumps(r["extra_columns"], ensure_ascii=False) if is_raw else None
+                    line = ([r["source_row_number"]] if is_raw else []) + [r[c] for c in physical_cols] + (
+                        [extra] if is_raw else []
+                    )
+                    writer.writerow(line)
+                yield buf.getvalue()
+                last_id = chunk[-1]["id"]
 
     filename = f"{table_name}_{run_id}.csv"
     return StreamingResponse(
@@ -253,7 +271,11 @@ def delete_run_route(run_id: UUID, deleted_by: str = Form(...), admin_token: str
     """
     if not settings.delete_token:
         raise HTTPException(503, "삭제 기능이 비활성화됨(INGESTION_DELETE_TOKEN 미설정)")
-    if not hmac.compare_digest(admin_token, settings.delete_token):
+    # bytes로 비교한다 — hmac.compare_digest(str, str)는 둘 중 하나라도 비-ASCII 문자를
+    # 담고 있으면 TypeError를 던진다(코드리뷰 2026-07-21 발견). admin_token은 사용자
+    # 입력이라 한글 등을 잘못 입력할 수 있으므로, 처리되지 않은 500 대신 항상 안전하게
+    # False로 판정되는 bytes 비교를 쓴다.
+    if not hmac.compare_digest(admin_token.encode("utf-8"), settings.delete_token.encode("utf-8")):
         raise HTTPException(403, "삭제 토큰이 올바르지 않음")
 
     deleted_by = deleted_by.strip()

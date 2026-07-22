@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>테이블 조회</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% include "_nav.html" %}
+<div class="page-header">
+  <h1>테이블 조회</h1>
+  <p class="hint">특정 run에 매이지 않고, 지금까지 적재된 전체 데이터를 테이블별로 훑어봅니다. 아래에서 테이블을 고르면 페이지 이동 없이 바로 표시됩니다.</p>
+</div>
+
+<h2>raw_*_rows (원본 계층)</h2>
+<nav class="subtabs">
+{% for t in tables if t.is_raw %}
+<a href="/tables/{{ t.name }}" class="tab" data-table="{{ t.name }}">{{ t.name }} <span class="count">{{ t.count }}행</span></a>
+{% endfor %}
+</nav>
+
+<h2>processed_* (전처리 결과 계층)</h2>
+<nav class="subtabs">
+{% for t in tables if not t.is_raw %}
+<a href="/tables/{{ t.name }}" class="tab" data-table="{{ t.name }}">{{ t.name }} <span class="count">{{ t.count }}행</span></a>
+{% endfor %}
+</nav>
+
+<div id="table-content"></div>
+
+<script src="/static/tables.js"></script>
+</body>
+</html>

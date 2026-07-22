@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import runs, upload
+from app.routers import runs, tables, upload
 
 app = FastAPI(title="data-ingestion-backend")
 
@@ -16,3 +16,4 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 app.include_router(upload.router)
 app.include_router(runs.router)
+app.include_router(tables.router)

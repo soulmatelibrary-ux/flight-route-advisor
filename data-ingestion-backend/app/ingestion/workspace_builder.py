@@ -278,13 +278,31 @@ def _convert_to_xlsx(source_path: Path, target_path: Path, original_filename: st
         ) from exc
 
 
+_CSV_ENCODING_FALLBACKS = ("utf-8-sig", "cp949")
+
+
+def _read_csv_grid_with_encoding_fallback(source_path: Path) -> pd.DataFrame:
+    # loaders.py의 raw 계층 읽기와 동일한 이유(코드리뷰 2026-07-21) — utf-8-sig 고정이면
+    # CP949/EUC-KR로 뽑은 CSV는 raw 계층에 적재는 되어도 스킬에 넘길 xlsx 변환 단계에서만
+    # 실패하는 불일치가 생긴다. 두 계층이 같은 인코딩 후보를 시도하도록 맞춘다.
+    last_exc: UnicodeDecodeError | None = None
+    for encoding in _CSV_ENCODING_FALLBACKS:
+        try:
+            return pd.read_csv(source_path, header=None, dtype=str, keep_default_na=False, encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_exc = exc
+    raise WorkspaceBuildError(
+        f"CSV 인코딩을 확인할 수 없음(UTF-8/CP949 모두 실패): {source_path.name!r}"
+    ) from last_exc
+
+
 def _convert_to_xlsx_unsafe(source_path: Path, target_path: Path) -> None:
     suffix = source_path.suffix.lower()
     if suffix == ".csv":
         # CSV는 시트 개념이 없다 — 스킬 일부(예: flow_management)는 원본 시트명을 그대로
         # 산출물의 "원본시트" 컬럼에 기록하므로, pandas 기본값("Sheet1")처럼 근거 없는 이름
         # 대신 원본 파일명에서 유도한 이름을 써서 "이 값은 CSV 출처"임을 추적 가능하게 한다.
-        grid = pd.read_csv(source_path, header=None, dtype=str, keep_default_na=False, encoding="utf-8-sig")
+        grid = _read_csv_grid_with_encoding_fallback(source_path)
         grid.to_excel(target_path, sheet_name=_csv_sheet_name(source_path), header=False, index=False, engine="openpyxl")
         return
     if suffix == ".xls":
