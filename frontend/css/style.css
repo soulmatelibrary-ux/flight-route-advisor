@@ -103,6 +103,8 @@ html, body {
 .fir-chain { display: flex; flex-wrap: wrap; gap: 6px; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
 .fir-chain .fir-badge { border: 1px solid var(--ink); border-radius: 4px; padding: 2px 6px; }
 
+.route-fois-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+
 .weather-popup { font-size: 12px; max-width: 260px; }
 .weather-popup .headline { font-weight: 700; }
 .weather-popup .risk { color: #c0392b; }

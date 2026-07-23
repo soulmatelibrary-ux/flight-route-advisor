@@ -11,6 +11,7 @@ import { bindAirportWeatherButtons } from "./weather.js";
 import { initRoutePanel } from "./route-panel.js";
 import { initFoisPanel } from "./fois-panel.js";
 import { initFlowManagementPanel } from "./flow-management-panel.js";
+import { initRouteFoisSummary } from "./route-fois-summary.js";
 import { initViewModeToggle } from "./viewmode.js";
 import { initMinimap } from "./minimap.js";
 
@@ -91,6 +92,7 @@ async function main() {
   initRoutePanel();
   initFoisPanel();
   initFlowManagementPanel();
+  initRouteFoisSummary();
   initMinimap(map, CONFIG);
 
   function fitToSelectedRoute() {
@@ -147,6 +149,15 @@ async function main() {
       routeLayers.render(state.routeResult, state.selectedOptionIndex, state.derived.firByIcao);
       renderFirChain(state.routeResult, state.selectedOptionIndex);
       if (state.viewMode === "focus" && state.selectedOptionIndex != null) fitToSelectedRoute();
+      // ADS-B 조회 기준을 지도 중심 대신 선택된 노선을 따라가도록(사용자 요청, 2026-07-23).
+      // 특정 옵션이 선택됐을 때만 적용 — "전체 겹쳐보기"(옵션 여럿)는 기존처럼 지도 중심.
+      if (state.selectedOptionIndex != null) {
+        const opt = state.routeResult.options[state.selectedOptionIndex];
+        const coords = opt.fullRouteCoords.length > 0 ? opt.fullRouteCoords : opt.trackCoords;
+        adsb.setRouteCoords(coords);
+      } else {
+        adsb.setRouteCoords(null);
+      }
     }
     if (event.type === "viewmode:changed") {
       renderForCurrentState();

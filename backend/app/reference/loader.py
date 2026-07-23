@@ -158,11 +158,26 @@ def _load_airways_with_seq() -> list[dict]:
 
 
 def load_airways(bbox: str | None = None) -> list[dict]:
-    """항공로 구간 (docs/03 §3: AW)."""
+    """항공로 구간 (docs/03 §3: AW).
+
+    bbox 필터는 세그먼트의 두 끝점이 **모두** bbox 안에 있을 때만 포함한다(2026-07-23
+    수정). 예전에는 `_flat_coords_bbox_overlaps`(세그먼트 자신의 bbox가 조회 bbox와
+    겹치기만 하면 포함)를 썼는데, 항로 구간은 웨이포인트 간격이 성긴 곳(대양 횡단 등)이
+    있어 한쪽 끝만 조회 bbox 안에 있고 반대쪽 끝은 수천 km 밖인 세그먼트도 "겹침"으로
+    잡혀 그대로 렌더링됐다 — 화면에 조회 영역 가장자리에서 화면 밖 먼 지점까지 이어지는
+    긴 직선(사용자가 "이상하게 그려짐"으로 신고, 2026-07-23)으로 보이는 원인이었다.
+    양끝점 모두 요구하면 그런 세그먼트는 빠지고(경계선을 살짝 스치는 짧은 세그먼트만
+    누락되는 정도), 실제로 그 영역 안에서 끝나는 세그먼트만 남는다.
+    """
     rows = _load_airways_with_seq()
     parsed_bbox = _parse_bbox(bbox)
     if parsed_bbox is not None:
-        rows = [row for row in rows if _flat_coords_bbox_overlaps(row["_c"], parsed_bbox)]
+        rows = [
+            row
+            for row in rows
+            if _point_in_bbox(row["a"][0], row["a"][1], parsed_bbox)
+            and _point_in_bbox(row["b"][0], row["b"][1], parsed_bbox)
+        ]
     return [{k: v for k, v in row.items() if k != "_c"} for row in rows]
 
 
@@ -170,19 +185,26 @@ _AIRPORT_CIVIL_PUBLIC_TYPES = ("A", "B")
 
 
 def load_airports(
-    bbox: str | None = None, type_filter: str | None = None
+    bbox: str | None = None, type_filter: str | None = None, icao: str | None = None
 ) -> list[dict]:
-    """공항 (docs/03 §3: AP). type_filter: A(민간)/B(민군 공용)/C(군용)/D(기타) 화이트리스트."""
+    """공항 (docs/03 §3: AP). type_filter: A(민간)/B(민군 공용)/C(군용)/D(기타) 화이트리스트.
+    icao가 있으면 bbox/type_filter 무시하고 그 목록만(load_firs와 동일 규약) — 특정 공항을
+    타입 불문 단건 조회할 때 쓴다(예: 부트 시 A/B만 받은 목록에 없는 군용/기타 타입
+    출도착 공항을 focus 모드에서 보강 조회, frontend/js/store.js selectOd 참고)."""
     rows = _load_json("airports.json")
-    parsed_bbox = _parse_bbox(bbox)
-    if parsed_bbox is not None:
-        rows = [row for row in rows if _point_in_bbox(row["c"][0], row["c"][1], parsed_bbox)]
-    if type_filter is not None:
-        wanted_types = {t.strip().upper() for t in type_filter.split(",") if t.strip()}
-        invalid = wanted_types - set(_AIRPORT_CIVIL_PUBLIC_TYPES + ("C", "D"))
-        if invalid:
-            raise ValueError(f"type 값이 올바르지 않음: {sorted(invalid)} (A/B/C/D만 허용)")
-        rows = [row for row in rows if row["t"] in wanted_types]
+    if icao:
+        wanted_icaos = {code.strip().upper() for code in icao.split(",") if code.strip()}
+        rows = [row for row in rows if row["i"] in wanted_icaos]
+    else:
+        parsed_bbox = _parse_bbox(bbox)
+        if parsed_bbox is not None:
+            rows = [row for row in rows if _point_in_bbox(row["c"][0], row["c"][1], parsed_bbox)]
+        if type_filter is not None:
+            wanted_types = {t.strip().upper() for t in type_filter.split(",") if t.strip()}
+            invalid = wanted_types - set(_AIRPORT_CIVIL_PUBLIC_TYPES + ("C", "D"))
+            if invalid:
+                raise ValueError(f"type 값이 올바르지 않음: {sorted(invalid)} (A/B/C/D만 허용)")
+            rows = [row for row in rows if row["t"] in wanted_types]
     return [
         {
             "icao": row["i"],

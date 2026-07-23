@@ -80,12 +80,17 @@ def get_airports(
     zoom: int | None = Query(default=None, ge=0, le=20),
     type: str | None = Query(
         default=None,
-        pattern=r"^[A-D](,[A-D])*$",
-        description="A/B/C/D 콤마 목록 (라우터 레벨 검증, docs/06-conventions.md §8)",
+        description=(
+            "A/B/C/D 콤마 목록. icao와 동시에 오면 icao가 우선이라 이 값은 쓰이지 않으므로 "
+            "형식 검증도 icao가 없을 때만 적용된다(loader.load_airports, 아래 icao 무시 규약과 "
+            "동일선상 — Query pattern으로 여기서 먼저 걸면 icao가 있어도 무조건 422가 나 "
+            "'icao 있으면 type 무시' 규약이 깨진다, 2026-07-23 리뷰 발견)"
+        ),
     ),
+    icao: str | None = Query(default=None, description="콤마로 구분된 공항 ICAO 목록 (있으면 bbox/type 완전히 무시)"),
 ):
     try:
-        data = loader.load_airports(bbox=bbox, type_filter=type)
+        data = loader.load_airports(bbox=bbox, type_filter=type, icao=icao)
     except _ASSET_ERRORS as exc:
         raise HTTPException(status_code=503, detail="참조 데이터 자산을 불러올 수 없음") from exc
     except ValueError as exc:

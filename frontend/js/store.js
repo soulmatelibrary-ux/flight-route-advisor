@@ -54,6 +54,31 @@ export async function bootMinimal() {
   }
 }
 
+// 부트 시 airports는 A/B(민간/공용)만 받는다(§3.1 2번, 최소 로드) — 그래서 군용/기타
+// 타입 공항이 dep/arr로 선택되면 bootAirports에 없어 focus 모드 마커가 조용히 빠진다
+// (리뷰 지적사항, 2026-07-23). 누락분만 icao 단건 조회(타입 무관)로 보강한다.
+// pendingAirportIcaos: 같은 icao를 향한 동시 요청이 중복 fetch→bootAirports 중복 push로
+// 이어지지 않도록 하는 가드(빠른 연속 OD 선택 시 재현 가능).
+const pendingAirportIcaos = new Set();
+
+async function ensureAirportsLoaded(icaos) {
+  const missing = icaos.filter(
+    (icao) => icao && !state.derived.airportByIcao.has(icao) && !pendingAirportIcaos.has(icao)
+  );
+  if (missing.length === 0) return;
+  for (const icao of missing) pendingAirportIcaos.add(icao);
+  try {
+    const res = await api.airports({ icao: missing.join(",") });
+    const fetched = res.data.map(adapt.toAirport);
+    for (const a of fetched) {
+      state.derived.airportByIcao.set(a.icao, a);
+      state.bootAirports.push(a);
+    }
+  } finally {
+    for (const icao of missing) pendingAirportIcaos.delete(icao);
+  }
+}
+
 function boundingBoxOfOptions(options) {
   let minLat = Infinity;
   let minLon = Infinity;
@@ -111,7 +136,7 @@ export async function selectOd(dep, arr) {
     if (seq !== odRequestSeq) return; // 더 최신 선택이 진행 중 — 이 응답은 폐기
     const options = res.data.options.map(adapt.toRouteOption);
     state.routeResult = { dep: res.data.dep, arr: res.data.arr, totalFlights: res.data.total_flights, options };
-    await loadFocusReference(options);
+    await Promise.all([loadFocusReference(options), ensureAirportsLoaded([dep, arr])]);
     if (seq !== odRequestSeq) return;
     notify({ type: "od:selected" });
   } catch (err) {

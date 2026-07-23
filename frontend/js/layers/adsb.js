@@ -40,11 +40,25 @@ async function fetchAircraft(lat, lon, radiusNm, endpoints) {
   throw lastErr ?? new Error("ADS-B 데이터를 가져올 수 없음");
 }
 
+// 노선 선택 시 지도 중심이 아니라 경로를 따라 여러 지점을 250NM씩 이어붙여 조회한다
+// (사용자 요청, 2026-07-23) — 노선 좌표 개수가 많아도(장거리 노선) API 호출이 과도해지지
+// 않도록 표본 지점 수를 상한(6)으로 제한한다. 선택된 경로가 없으면 기존처럼 지도 중심만 쓴다.
+const MAX_ROUTE_SAMPLE_POINTS = 6;
+
+function sampleRoutePoints(coords, maxPoints) {
+  if (coords.length <= maxPoints) return coords;
+  const step = (coords.length - 1) / (maxPoints - 1);
+  const points = [];
+  for (let i = 0; i < maxPoints; i++) points.push(coords[Math.round(i * step)]);
+  return points;
+}
+
 export function createAdsbLayer(map, CONFIG) {
   const group = L.layerGroup();
   const markersByHex = new Map();
   let timer = null;
   let consecutiveFailures = 0;
+  let routeCoords = null;
 
   function iconFor(track) {
     return L.divIcon({
@@ -107,13 +121,37 @@ export function createAdsbLayer(map, CONFIG) {
     }
   }
 
+  function pollCenters() {
+    if (routeCoords && routeCoords.length > 0) {
+      return sampleRoutePoints(routeCoords, MAX_ROUTE_SAMPLE_POINTS).map(([lat, lon]) => ({ lat, lon }));
+    }
+    const c = map.getCenter();
+    return [{ lat: c.lat, lon: c.lng }];
+  }
+
   async function poll(chipEl) {
     try {
-      const center = map.getCenter();
-      const list = await fetchAircraft(center.lat, center.lng, CONFIG.adsb.radiusNm, CONFIG.adsb.endpoints);
+      const centers = pollCenters();
+      const settled = await Promise.allSettled(
+        centers.map((c) => fetchAircraft(c.lat, c.lon, CONFIG.adsb.radiusNm, CONFIG.adsb.endpoints)),
+      );
+      // 표본 지점 중 일부만 실패해도(예: 한 지점만 레이트리밋) 성공한 지점의 항공기는
+      // 그대로 보여준다 — 전부 실패했을 때만 전체 폴링 실패로 취급한다.
+      const merged = new Map();
+      let anySuccess = false;
+      let lastError;
+      for (const r of settled) {
+        if (r.status === "fulfilled") {
+          anySuccess = true;
+          for (const ac of r.value) if (ac.hex) merged.set(ac.hex, ac);
+        } else {
+          lastError = r.reason;
+        }
+      }
+      if (!anySuccess) throw lastError ?? new Error("모든 조회 지점 실패");
       consecutiveFailures = 0;
       const seen = new Set();
-      for (const ac of list) {
+      for (const ac of merged.values()) {
         if (ac.lat != null && ac.lon != null) {
           upsert(ac);
           seen.add(ac.hex);
@@ -153,5 +191,11 @@ export function createAdsbLayer(map, CONFIG) {
     timer = null;
   }
 
-  return { group, start, stop };
+  /** 노선 선택/해제 시 main.js가 호출 — coords가 있으면 그 경로를 따라 표본 지점으로
+   * 폴링하고, null/빈 배열이면 지도 중심 기준(기존 동작)으로 되돌아간다. */
+  function setRouteCoords(coords) {
+    routeCoords = coords && coords.length > 0 ? coords : null;
+  }
+
+  return { group, start, stop, setRouteCoords };
 }

@@ -8,6 +8,7 @@
  * 텍스트로 대체.
  */
 import { normalizeWinding } from "../geo.js";
+import { escapeHtml } from "../html.js";
 
 const L = window.L;
 
@@ -42,9 +43,14 @@ export function createRouteLayers(map, CONFIG) {
         fillRule: "nonzero",
         color: CONFIG.tokens.orange,
         weight: 1,
-        fillColor: CONFIG.tokens.orange,
-        fillOpacity: 0.12,
-      }).addTo(firHighlight);
+        // 출발/도착 FIR처럼 노선이 스치듯만 지나가는 큰 FIR은 화면 가장자리에서 옅은
+        // 색이 눈에 잘 안 띈다는 피드백(2026-07-23) — 투명도를 올려 가시성 확보
+        fillOpacity: 0.22,
+      })
+        // 팝업이 없으면 "실제로 칠해지는지" 클릭으로 검증할 방법이 없었다 — reference.js
+        // 기본 FIR 레이어와 동일하게 붙여 진단 가능하게 함
+        .bindPopup(`<b>${escapeHtml(fir.icao)}</b><br>${escapeHtml(fir.nameEn)}`)
+        .addTo(firHighlight);
     }
   }
 

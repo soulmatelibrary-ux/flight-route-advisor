@@ -70,7 +70,7 @@ export const api = {
   firs: ({ bbox, icao } = {}) => getJson("/reference/firs", { bbox, icao }),
   tca: ({ bbox } = {}) => getJson("/reference/tca", { bbox }),
   airways: ({ bbox } = {}) => getJson("/reference/airways", { bbox }),
-  airports: ({ bbox, type } = {}) => getJson("/reference/airports", { bbox, type }),
+  airports: ({ bbox, type, icao } = {}) => getJson("/reference/airports", { bbox, type, icao }),
   navaids: ({ bbox } = {}) => getJson("/reference/navaids", { bbox }),
   waypoints: ({ bbox, limit } = {}) => getJson("/reference/waypoints", { bbox, limit }),
   foisDelays: ({ direction, airport, dateFrom, dateTo } = {}) =>
