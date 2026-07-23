@@ -15,14 +15,19 @@
     "labelZoom": { "fir": 3, "firKo": 4, "tca": 7, "airway": 7, "fix": 7, "airportIcao": 8, "navaid": 8 },
     "airportFullTypeZoom": 5,
     "airportLowZoomTypes": ["A", "B"],
-    "minimap": { "zoom": 1 }
+    "minimap": { "zoom": 1 },
+    "homeFirIcao": "RKRR",
+    "homeWaypointCountry": "KS",
+    "waypointRadius": { "home": 1.5, "foreign": 0.8 },
+    "minSampleForCongestionTag": 5
   },
   "tokens": {
     "ink": "#22303c",
     "inkSoft": "#7a8a99",
     "paper": "#fbfbf9",
     "orange": "#e8590c",
-    "blue": "#1d5fae"
+    "blue": "#1d5fae",
+    "green": "#2e8b57"
   },
   "adsb": {
     "pollMs": 12000,
@@ -37,7 +42,18 @@
   "weather": {
     "metarUrl": "https://aviationweather.gov/api/data/metar",
     "tafUrl": "https://aviationweather.gov/api/data/taf",
+    "sigmetUrl": "https://aviationweather.gov/api/data/isigmet",
+    "pirepUrl": "https://aviationweather.gov/api/data/pirep",
     "publicProxies": ["https://corsproxy.io/?url=", "https://api.allorigins.win/raw?url="]
+  },
+  "radar": {
+    "framesUrl": "https://api.rainviewer.com/public/weather-maps.json",
+    "tileSize": 256,
+    "color": 2,
+    "options": "1_1",
+    "maxNativeZoom": 6,
+    "opacity": 0.6,
+    "playIntervalMs": 500
   },
   "externalApis": {}
 }

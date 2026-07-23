@@ -36,6 +36,17 @@ const DEFAULT_CONFIG = {
     airportFullTypeZoom: 5,
     airportLowZoomTypes: ["A", "B"],
     minimap: { zoom: 1 },
+    // 전세계/지역 컨텍스트에서 항로/픽스/항행시설 전량을 그대로 보여주면 너무 번잡하다는
+    // 피드백(2026-07-23) — 우리나라(FIR·픽스 country 코드)는 항상 보여주고, 나머지는
+    // 선택된 경로의 경유 FIR 반경(bbox)에 들 때만 보여준다(main.js filterByRelevantFirs).
+    homeFirIcao: "RKRR",
+    homeWaypointCountry: "KS",
+    // 픽스 마커 반경(px) — 자국(우리나라)과 외국을 다르게(외국은 더 작게)
+    waypointRadius: { home: 1.5, foreign: 0.8 },
+    // 지연율 상대비교 배지("지연 최저"/"상대적 혼잡")는 편수가 이 값 미만인 옵션에는
+    // 아예 안 붙인다 — 1~2편짜리 표본에서 지연 1건이 "100%·혼잡"으로 과장돼 보이는
+    // 문제(사용자 확정, 2026-07-23) 방지. route-panel.js에서 사용.
+    minSampleForCongestionTag: 5,
   },
   tokens: {
     ink: "#22303c",
@@ -43,6 +54,13 @@ const DEFAULT_CONFIG = {
     paper: "#fbfbf9",
     orange: "#e8590c",
     blue: "#1d5fae",
+    // SID/STAR(원본 문서/08 §SS: 파랑=SID, 녹색=STAR) 전용
+    green: "#2e8b57",
+    // 항공기 실루엣(완성본 FR24 스타일 이식, PORTING_PACKAGE_ROOT 참고) 전용
+    aircraftYellow: "#f7c440",
+    aircraftGround: "#aeb7bf",
+    aircraftOutline: "#4a5560",
+    aircraftHalo: "rgba(255,255,255,0.95)",
   },
   adsb: {
     pollMs: 12000,
@@ -54,15 +72,39 @@ const DEFAULT_CONFIG = {
       "https://api.airplanes.live/v2/point/{lat}/{lon}/{radiusNm}",
     ],
     callsignLookupUrl: "https://api.adsbdb.com/v0/callsign/{callsign}",
+    // 지도 라벨(상시 표시)용 출발→도착 코드 캐시 조회 — adsb.lol 우선, 실패 시 adsbdb 폴백
+    // (완성본 PORTING_PACKAGE_ROOT의 acCodes 배치 조회 로직 이식, 사용자 요청 2026-07-23)
+    routeCodeLookupUrl: "https://api.adsb.lol/api/0/route/{callsign}",
+    routeCodeBatchSize: 12, // 폴링 사이클당 조회할 편명 수 상한(무료 API 부하 제한)
+    routeCodeBatchDelayMs: 250, // 배치 내 요청 간 간격
   },
   weather: {
     // 지도의 AWC 호출 폴백 체인(직접 → 로컬 프록시 → 공개 프록시), 성공 경로 기억(문서 03/05/07)
     metarUrl: "https://aviationweather.gov/api/data/metar",
     tafUrl: "https://aviationweather.gov/api/data/taf",
+    // SIGMET/PIREP도 같은 AWC 호스트라 CORS 사정이 동일(직접 호출 실측 시 CORS 헤더
+    // 없음 확인, 2026-07-23) — metar/taf와 동일한 폴백 체인을 그대로 탄다.
+    sigmetUrl: "https://aviationweather.gov/api/data/isigmet",
+    pirepUrl: "https://aviationweather.gov/api/data/pirep",
     publicProxies: [
       "https://corsproxy.io/?url=",
       "https://api.allorigins.win/raw?url=",
     ],
+  },
+  // 기상 레이더(RainViewer, docs/10 §2.5 레이어⑤·원본 문서/01 §RainViewer). 실측 확인:
+  // api.rainviewer.com/public/weather-maps.json → radar.past(과거 2시간, ~10분 간격
+  // 프레임) + tilecache.rainviewer.com 둘 다 CORS `*` 허용이라 프록시 불필요.
+  radar: {
+    framesUrl: "https://api.rainviewer.com/public/weather-maps.json",
+    // {host}{path}/{size}/{z}/{x}/{y}/{color}/{options}.png — RainViewer 공개 타일 규약.
+    // color=2(범용 블루-그린-레드), options=1_1(스무딩+눈 표시), maxNativeZoom=6(원본
+    // 문서/05 트러블슈팅: z7+는 "Zoom Level Not Supported").
+    tileSize: 256,
+    color: 2,
+    options: "1_1",
+    maxNativeZoom: 6,
+    opacity: 0.6,
+    playIntervalMs: 500,
   },
   externalApis: {},
 };

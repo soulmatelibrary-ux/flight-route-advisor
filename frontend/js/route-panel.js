@@ -3,6 +3,8 @@
  * 옵션 목록(편수/평균소요/지연/HEAVY/경유FIR/인천FIR픽스체인), 클릭 강조.
  */
 import { getState, subscribe, selectOd, selectOption } from "./store.js";
+import { escapeHtml } from "./html.js";
+import { getConfig } from "./config.js";
 
 function groupByDep(odPairs) {
   const byDep = new Map();
@@ -23,6 +25,18 @@ function groupByDep(odPairs) {
 
 function fmtMin(min) {
   return `${Math.round(min)}분`;
+}
+
+// 혼잡/지연 위험 — 과거 통계(ODR2 delay_count/heavy_count/flights)만으로 판단(사용자 요청,
+// 2026-07-23). "50% 이상이면 위험" 같은 절대 임계값은 근거가 없어 정하지 않고(허위 판정
+// 기준 생성 금지), 같은 OD의 후보 경로들 사이 **상대 비교**로만 "왜 이 경로를 권장하는지 /
+// 어디가 상대적으로 막히는지"를 서술한다.
+function delayRate(opt) {
+  return opt.flights > 0 ? opt.delayCount / opt.flights : 0;
+}
+
+function heavyRate(opt) {
+  return opt.flights > 0 ? opt.heavyCount / opt.flights : 0;
 }
 
 export function initRoutePanel() {
@@ -72,9 +86,26 @@ export function initRoutePanel() {
     const best = options.reduce((a, b) => (b.flights > a.flights ? b : a), options[0]);
     const bestIdx = options.indexOf(best);
     const bestShare = totalFlights > 0 ? Math.round((best.flights / totalFlights) * 100) : 0;
+
+    // "왜 이 경로를 권장하는지" 근거를 후보 간 상대 비교로 명시(사용자 요청, 2026-07-23).
+    // 편수가 극히 적은 옵션(예: 1편)은 지연 1건만으로 지연율이 0%/100%로 튀어 비교 기준을
+    // 왜곡하므로 minSampleForCongestionTag 미만은 비교 대상에서 제외(사용자 확정, 2026-07-23).
+    const MIN_SAMPLE = getConfig().display.minSampleForCongestionTag;
+    const reliableRates = options.filter((o) => o.flights >= MIN_SAMPLE).map(delayRate);
+    const bestRatePct = Math.round(delayRate(best) * 100);
+    const reasons = [`실제 운항의 ${bestShare}%가 이 경로를 이용(가장 많이 쓰인 경로)`];
+    if (reliableRates.length > 1 && best.flights >= MIN_SAMPLE) {
+      const minRate = Math.min(...reliableRates);
+      reasons.push(
+        delayRate(best) === minRate
+          ? `지연율도 후보 중 가장 낮음(${bestRatePct}%)`
+          : `지연율 ${bestRatePct}%(후보 중 최저는 ${Math.round(minRate * 100)}%)`,
+      );
+    }
+
     briefingEl.textContent =
       `총 ${totalFlights}편 · HEAVY ${heavyTotal}대 · 후보 ${options.length}개\n` +
-      `경로 ${bestIdx + 1} 권장 — 운항 ${bestShare}%`;
+      `경로 ${bestIdx + 1} 권장 — ${reasons.join(" · ")}`;
   }
 
   function renderOptions(routeResult, selectedIndex) {
@@ -82,6 +113,14 @@ export function initRoutePanel() {
     if (!routeResult) return;
     const { options, totalFlights } = routeResult;
     const shortest = options.reduce((a, b) => (b.avgMin < a.avgMin ? b : a), options[0]);
+    // 후보 간 지연율 상대 비교로 "어디가 상대적으로 막히는지" 배지 표시(사용자 요청,
+    // 2026-07-23) — 절대 임계값 없이, 이 OD의 후보들 안에서 최저/최고만 표시. 편수가
+    // minSampleForCongestionTag 미만인 옵션은 비교 대상·배지 부착 모두에서 제외한다
+    // (1편 지연 1건 = "100%·상대적 혼잡"으로 과장돼 보이던 문제, 사용자 확정 2026-07-23).
+    const MIN_SAMPLE = getConfig().display.minSampleForCongestionTag;
+    const reliableRates = options.filter((o) => o.flights >= MIN_SAMPLE).map(delayRate);
+    const minRate = reliableRates.length > 0 ? Math.min(...reliableRates) : null;
+    const maxRate = reliableRates.length > 0 ? Math.max(...reliableRates) : null;
 
     const allLi = document.createElement("li");
     allLi.textContent = "전체 겹쳐보기";
@@ -99,9 +138,18 @@ export function initRoutePanel() {
       row1.innerHTML = `<span>경로 ${idx + 1}${opt === shortest ? " [최단]" : ""}</span><span>${fmtMin(opt.avgMin)}${
         delta > 0 ? ` <span class="delta-red">(+${Math.round(delta)}분)</span>` : ""
       }</span>`;
+      const rate = delayRate(opt);
+      const ratePct = Math.round(rate * 100);
+      let congestionTag = "";
+      if (opt.flights >= MIN_SAMPLE && minRate !== null && maxRate > minRate) {
+        if (rate === minRate) congestionTag = ` <span class="tag-good">지연 최저</span>`;
+        else if (rate === maxRate) congestionTag = ` <span class="tag-warn">상대적 혼잡</span>`;
+      }
       const row2 = document.createElement("div");
       row2.className = "row2";
-      row2.textContent = `운항 ${share}% · 지연 ${opt.delayCount} · HEAVY ${opt.heavyCount} · ${opt.enrouteFirs.join(" → ")}`;
+      row2.innerHTML =
+        `운항 ${share}% · 지연율 ${ratePct}%(${opt.delayCount}건) · HEAVY ${opt.heavyCount}(${Math.round(heavyRate(opt) * 100)}%) · ` +
+        `${escapeHtml(opt.enrouteFirs.join(" → "))}${congestionTag}`;
       li.append(row1, row2);
       li.addEventListener("click", () => selectOption(idx));
       listEl.appendChild(li);

@@ -253,3 +253,17 @@ def load_waypoints(bbox: str | None = None, limit: int = WAYPOINTS_LIMIT_MAX) ->
         {"ident": ident, "lat": lat, "lon": lon, "country": country}
         for ident, lat, lon, country in rows
     ]
+
+
+def load_sidstar(airport: str | None = None) -> list[dict]:
+    """SID/STAR 절차 (docs/03 §3: SS, 한국만 — 원본 문서/08 §SS, SID 14·STAR 103).
+
+    proc: 1=SID(파랑), 2=STAR(녹색). airport로 걸러야 의미 있는 규모라(공항 없이 전체
+    117건은 그대로 반환 — 개수가 작아 bbox 필터가 필요 없다) 별도 캐시 없이 매번 필터링.
+    """
+    rows = _load_json("sidstar.json")
+    return [
+        {"proc": proc, "name": name, "airport": row_airport, "coords": _to_pairs(coords)}
+        for proc, name, row_airport, coords in rows
+        if airport is None or row_airport == airport
+    ]

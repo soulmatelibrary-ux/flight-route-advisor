@@ -39,11 +39,17 @@
     <section id="map-wrap">
       <div id="map"></div>
       <div id="minimap"></div>
+      <div id="radar-bar" hidden>
+        <button id="radar-play-btn" type="button" aria-label="재생/일시정지">▶</button>
+        <input id="radar-slider" type="range" min="0" max="0" value="0" step="1" aria-label="레이더 프레임" />
+        <span id="radar-time" class="muted"></span>
+      </div>
     </section>
 
     <section id="panel-right" class="panel">
       <h2>의사결정 근거</h2>
       <div id="fir-chain" class="fir-chain muted">경로를 선택하면 경유 FIR 체인이 표시됩니다.</div>
+      <div id="route-ops-summary" class="route-ops-summary muted"></div>
       <div id="route-fois-summary" class="route-fois-summary muted"></div>
 
       <h2>FOIS 지연원인</h2>
@@ -93,6 +99,24 @@
       <ol id="flow-items" class="flow-items"></ol>
       <button id="flow-more-btn" type="button" hidden>더 보기</button>
       <p id="flow-error" class="error" hidden></p>
+
+      <h2>공항 운항 KPI (ACDM)</h2>
+      <form id="ops-form">
+        <div class="field">
+          <label for="ops-airport">공항 ICAO</label>
+          <input id="ops-airport" type="text" maxlength="4" placeholder="예: RKSI" required />
+        </div>
+        <div class="field fois-date-range">
+          <label for="ops-date-from">기간 (선택)</label>
+          <input id="ops-date-from" type="date" />
+          <span aria-hidden="true">~</span>
+          <input id="ops-date-to" type="date" />
+        </div>
+        <button id="ops-search-btn" type="submit">조회</button>
+      </form>
+      <p id="ops-summary" class="muted"></p>
+      <dl id="ops-result" class="ops-result" hidden></dl>
+      <p id="ops-error" class="error" hidden></p>
     </section>
   </main>
 

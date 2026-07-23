@@ -7,13 +7,20 @@ import { escapeHtml } from "./html.js";
 import { createReferenceLayers } from "./layers/reference.js";
 import { createRouteLayers } from "./layers/route.js";
 import { createAdsbLayer } from "./layers/adsb.js";
-import { bindAirportWeatherButtons } from "./weather.js";
+import { createHazardLayers } from "./layers/hazards.js";
+import { createRadarLayer } from "./layers/radar.js";
+import { bindAirportWeatherButtons, getSigmets, getPireps } from "./weather.js";
 import { initRoutePanel } from "./route-panel.js";
 import { initFoisPanel } from "./fois-panel.js";
 import { initFlowManagementPanel } from "./flow-management-panel.js";
 import { initRouteFoisSummary } from "./route-fois-summary.js";
+import { initRouteOpsSummary } from "./route-ops-summary.js";
+import { initOpsPanel } from "./ops-panel.js";
 import { initViewModeToggle } from "./viewmode.js";
 import { initMinimap } from "./minimap.js";
+import { boundsOfPolygons, pointInBounds, unionBounds } from "./geo.js";
+import { api } from "./api.js";
+import { toWaypoint, toSidStar } from "./adapters.js";
 
 const L = window.L;
 
@@ -73,11 +80,62 @@ async function main() {
     L.tileLayer(CONFIG.tileUrl, { maxZoom: 19 }).addTo(map);
   }
 
-  const referenceLayers = createReferenceLayers(map, CONFIG);
+  // 지역컨텍스트에서 클릭으로 "고정"한 FIR(홈 FIR·경로 FIR 외 추가로 항로/픽스를 보고
+  // 싶은 FIR, 사용자 피드백 2026-07-23) — relevantFirBounds가 참조한다. onFirClick은
+  // 뷰모드와 무관하게 항상 등록돼 있어 결정 포커스에서 클릭해도 pin은 기록되지만, 그
+  // 즉시 반영되진 않고(gate: viewMode !== "focus") 이후 지역컨텍스트로 전환할 때
+  // renderForCurrentState()가 relevantFirBounds를 다시 계산하며 자동 적용된다.
+  const pinnedFirIcaos = new Set();
+  const referenceLayers = createReferenceLayers(map, CONFIG, {
+    onFirClick(icao) {
+      if (pinnedFirIcaos.has(icao)) return;
+      pinnedFirIcaos.add(icao);
+      const state = getState();
+      if (state.viewMode !== "focus" && state.bulk) applyBulkOverlayFilters(state);
+    },
+  });
   for (const group of Object.values(referenceLayers.groups)) group.addTo(map);
   const routeLayers = createRouteLayers(map, CONFIG);
   const adsb = createAdsbLayer(map, CONFIG);
   adsb.group.addTo(map);
+  const hazards = createHazardLayers(CONFIG);
+  const radar = createRadarLayer(map, CONFIG);
+
+  // 위험기상(SIGMET/PIREP)은 기본 OFF·조건부 토글(docs/10 §2.5 ④) — 레이어 컨트롤에서
+  // 켤 때만 조회한다(radar.js의 온디맨드 로드와 동일 원칙). SIGMET은 전세계 목록이라
+  // bbox 없이 1회 조회, PIREP은 `bbox` 필수라 현재 지도 뷰포트 기준으로 조회 —
+  // 지도를 이동해도 자동 재조회는 하지 않는다(토글 재클릭으로 갱신, 의도적 축소범위).
+  // seq 가드(리뷰 지적사항, 2026-07-23): 체크박스를 빠르게 껐다 켰다 하면 프록시
+  // 폴백 체인이 수초 걸리는 동안 오래된 응답이 나중에 도착해 최신 상태를 덮어쓸 수
+  // 있다 — selectOd/setViewMode와 동일한 세대 토큰 패턴.
+  let sigmetSeq = 0;
+  let pirepSeq = 0;
+  map.on("overlayadd", async (e) => {
+    if (e.layer === hazards.sigmetGroup) {
+      const seq = ++sigmetSeq;
+      try {
+        const data = await getSigmets();
+        if (seq !== sigmetSeq) return;
+        hazards.renderSigmets(data);
+      } catch {
+        if (seq !== sigmetSeq) return;
+        toast("SIGMET 조회 실패 — 네트워크 연결을 확인하세요");
+      }
+    }
+    if (e.layer === hazards.pirepGroup) {
+      const seq = ++pirepSeq;
+      const b = map.getBounds();
+      const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(",");
+      try {
+        const data = await getPireps({ bbox });
+        if (seq !== pirepSeq) return;
+        hazards.renderPireps(data);
+      } catch {
+        if (seq !== pirepSeq) return;
+        toast("PIREP 조회 실패 — 네트워크 연결을 확인하세요");
+      }
+    }
+  });
 
   L.control.layers(null, {
     "전 세계 FIR": referenceLayers.groups.firs,
@@ -85,7 +143,11 @@ async function main() {
     항공로: referenceLayers.groups.airways,
     "항로 픽스": referenceLayers.groups.waypoints,
     항행시설: referenceLayers.groups.navaids,
+    "SID/STAR": routeLayers.sidstar,
     "실시간 항공기": adsb.group,
+    "SIGMET(위험기상)": hazards.sigmetGroup,
+    PIREP: hazards.pirepGroup,
+    "기상 레이더": radar.group,
   }, { position: "bottomright" }).addTo(map);
 
   bindAirportWeatherButtons(map);
@@ -93,12 +155,18 @@ async function main() {
   initFoisPanel();
   initFlowManagementPanel();
   initRouteFoisSummary();
+  initRouteOpsSummary();
+  initOpsPanel();
   initMinimap(map, CONFIG);
 
   function fitToSelectedRoute() {
     const state = getState();
     if (!state.routeResult || state.selectedOptionIndex == null) return false;
-    const bounds = routeLayers.render(state.routeResult, state.selectedOptionIndex, state.derived.firByIcao);
+    // render()가 아니라 boundsFor()만 쓴다 — render()는 clear()로 sidstar까지 지우는데
+    // 여기(뷰모드 전환)는 refreshSidStar를 다시 안 불러서 SID/STAR가 사라진 채로 안
+    // 돌아오는 버그가 있었다(리뷰 지적사항, 2026-07-23). 경로 자체는 이미 od:selected/
+    // option:selected 때 그려져 있으므로 다시 그릴 필요가 없다.
+    const bounds = routeLayers.boundsFor(state.routeResult, state.selectedOptionIndex, state.derived.airportByIcao);
     if (bounds) map.fitBounds(bounds, { padding: [40, 40] });
     return true;
   }
@@ -113,24 +181,104 @@ async function main() {
     return state.bootAirports.filter((a) => a.icao === state.dep || a.icao === state.arr);
   }
 
+  // 전세계/지역 컨텍스트에서 항로·픽스·항행시설(country 태그 없음) 전량을 그대로 그리면
+  // 너무 번잡하다는 피드백(2026-07-23) — 우리나라(CONFIG.display.homeFirIcao) FIR은 항상,
+  // 나머지는 현재 관련 있는 FIR(선택된 경로의 경유 FIR)의 bbox 안에 있을 때만 남긴다.
+  // 정확한 점-폴리곤 판정 대신 bbox를 쓰는 이유는 geo.js의 boundsOfPolygons 주석 참고
+  // (항로 89,555개 전부에 폴리곤 판정을 돌리면 메인 스레드가 오래 막힘).
+  function relevantFirBounds(state) {
+    const icaos = new Set([CONFIG.display.homeFirIcao, ...pinnedFirIcaos]);
+    for (const f of state.focusFirs) icaos.add(f.icao);
+    const bounds = [];
+    for (const icao of icaos) {
+      const fir = state.derived.firByIcao.get(icao);
+      if (fir) bounds.push(boundsOfPolygons(fir.polygons));
+    }
+    return bounds;
+  }
+
+  function inAnyBounds(lat, lon, boundsList) {
+    return boundsList.some((b) => pointInBounds(lat, lon, b));
+  }
+
+  // 픽스(waypoints)는 서버가 limit<=800으로 강제 하드캡한다(전 세계 실제 개수는 58,812).
+  // bbox 없이 받으면 세계 어딘가의 임의 800개일 뿐이라(실측: 그중 우리나라·관련 FIR에
+  // 속하는 게 800개 중 4개뿐이었음, 2026-07-23), state.bulk.waypoints를 그대로 클라이언트
+  // 필터링해봐야 의미가 없다 — 관련 FIR bbox로 서버에 다시 요청해서 그 범위 안에서
+  // 800개를 채우도록 한다. 관련 FIR(선택 경로)이 바뀔 때마다 다시 부른다.
+  let waypointsFetchSeq = 0;
+  async function refreshScopedWaypoints(state) {
+    if (state.viewMode === "focus" || !state.bulk) return;
+    const boundsList = relevantFirBounds(state);
+    if (boundsList.length === 0) return;
+    const seq = ++waypointsFetchSeq;
+    const bbox = unionBounds(boundsList).join(",");
+    try {
+      const res = await api.waypoints({ bbox, limit: CONFIG.display.waypointLimit });
+      // 응답 도착 전에 더 최신 요청이 시작됐거나(seq 불일치) 그사이 결정 포커스로
+      // 전환됐으면(포커스는 자기 몫의 state.focusWaypoints를 이미 동기로 렌더해 둠) 폐기한다.
+      if (seq !== waypointsFetchSeq || getState().viewMode === "focus") return;
+      referenceLayers.renderWaypoints(res.data.map(toWaypoint));
+    } catch {
+      // 픽스 조회 실패는 치명적이지 않음(장식적 참조 레이어) — 기존 표시 유지
+    }
+  }
+
+  // 우리나라 공항: 출발이면 SID, 도착이면 STAR를 경로 선택 시 같이 표시(사용자 요청,
+  // 2026-07-23). sidstar 데이터는 한국 공항만 있어(원본 문서/08 §SS) 외국 공항이면
+  // 그냥 빈 배열이 온다 — ICAO 접두사로 미리 거를 필요 없이 결과만 각 역할별로 필터.
+  let sidStarSeq = 0;
+  async function refreshSidStar(dep, arr) {
+    const seq = ++sidStarSeq;
+    // 출발/도착 중 하나만 조회 실패해도(네트워크 일시 오류 등) 나머지 하나는 보여준다
+    // (리뷰 지적사항, 2026-07-23) — waypoints/sigmet/pirep과 동일하게 Promise.all 대신
+    // allSettled로 부분 실패를 허용.
+    const [depOutcome, arrOutcome] = await Promise.allSettled([
+      api.sidstar({ airport: dep }),
+      api.sidstar({ airport: arr }),
+    ]);
+    if (seq !== sidStarSeq) return; // 더 최신 선택이 진행 중 — 폐기
+    const sid = depOutcome.status === "fulfilled" ? depOutcome.value.data.filter((r) => r.proc === 1).map(toSidStar) : [];
+    const star = arrOutcome.status === "fulfilled" ? arrOutcome.value.data.filter((r) => r.proc === 2).map(toSidStar) : [];
+    routeLayers.renderSidStar([...sid, ...star]);
+  }
+
+  function filterNavaidsForBulk(rows, boundsList) {
+    return rows.filter((nv) => inAnyBounds(nv.lat, nv.lon, boundsList));
+  }
+
+  function filterAirwaysForBulk(rows, boundsList) {
+    return rows.filter(
+      (aw) => inAnyBounds(aw.coords[0][0], aw.coords[0][1], boundsList) || inAnyBounds(aw.coords[1][0], aw.coords[1][1], boundsList),
+    );
+  }
+
+  // FIR/공항 레이어는 다시 그리지 않고 항로·항행시설·픽스만 relevantFirBounds 기준으로
+  // 다시 필터링한다 — FIR 클릭으로 pinnedFirIcaos가 바뀐 직후 이걸 호출하는데, renderFirs를
+  // 같이 다시 그리면 방금 클릭해서 열린 팝업이 레이어 재생성으로 닫혀버린다.
+  function applyBulkOverlayFilters(state) {
+    const boundsList = relevantFirBounds(state);
+    referenceLayers.renderAirways(filterAirwaysForBulk(state.bulk.airways, boundsList));
+    referenceLayers.renderNavaids(filterNavaidsForBulk(state.bulk.navaids, boundsList));
+    refreshScopedWaypoints(state); // 비동기 — 완료되면 renderWaypoints를 별도 호출
+  }
+
   function renderForCurrentState() {
     const state = getState();
     if (state.viewMode === "focus") {
       referenceLayers.renderFirs(state.focusFirs);
       referenceLayers.renderAirways(state.focusAirways);
       referenceLayers.renderTca([]);
-      referenceLayers.renderWaypoints([]);
+      referenceLayers.renderWaypoints(state.focusWaypoints);
       referenceLayers.renderNavaids([]);
       referenceLayers.renderAirports(focusAirportsFor(state));
       referenceLayers.showFocus();
     } else if (state.bulk) {
       referenceLayers.renderFirs(state.bulk.firs);
       referenceLayers.renderTca(state.bulk.tca);
-      referenceLayers.renderAirways(state.bulk.airways);
-      referenceLayers.renderWaypoints(state.bulk.waypoints);
-      referenceLayers.renderNavaids(state.bulk.navaids);
       referenceLayers.renderAirports(state.bulk.airports);
       referenceLayers.showBulk();
+      applyBulkOverlayFilters(state);
     }
     updateCounts(state);
   }
@@ -140,13 +288,27 @@ async function main() {
       toast(event.message);
     }
     if (event.type === "boot:ok") {
-      referenceLayers.renderAirports(state.bootAirports);
-      referenceLayers.showFocus();
-      updateCounts(state);
+      // 부팅 직후 기본값: 우리나라(홈) FIR·항로·픽스를 즉시 그리고(사용자 요청,
+      // 2026-07-23 — loadFocusReference가 이미 계산해 둔 focusFirs/focusAirways/
+      // focusWaypoints를 렌더만 누락하고 있었음) 지도도 그 FIR 범위로 맞춰 실시간
+      // 항공기(지도 중심 기준 폴링) 조회도 우리나라 상공을 향하게 한다.
+      try {
+        renderForCurrentState();
+        const homeFir = state.derived.firByIcao.get(CONFIG.display.homeFirIcao);
+        if (homeFir) {
+          const [minLat, minLon, maxLat, maxLon] = boundsOfPolygons(homeFir.polygons);
+          map.fitBounds([[minLat, minLon], [maxLat, maxLon]], { padding: [40, 40] });
+        }
+      } catch (err) {
+        // 데이터는 이미 정상 로드됐으므로(이 블록은 boot:ok 시점) 여기서 실패해도
+        // bootMinimal의 catch로 전파해 "초기 데이터 로드 실패" 토스트를 잘못 띄우지
+        // 않는다 — 렌더/뷰맞춤은 장식적이라 실패해도 앱 사용에 치명적이지 않음.
+        console.error("초기 화면 렌더 실패", err);
+      }
     }
     if (event.type === "od:selected" || event.type === "option:selected") {
       renderForCurrentState();
-      routeLayers.render(state.routeResult, state.selectedOptionIndex, state.derived.firByIcao);
+      routeLayers.render(state.routeResult, state.selectedOptionIndex, state.derived.firByIcao, state.derived.airportByIcao);
       renderFirChain(state.routeResult, state.selectedOptionIndex);
       if (state.viewMode === "focus" && state.selectedOptionIndex != null) fitToSelectedRoute();
       // ADS-B 조회 기준을 지도 중심 대신 선택된 노선을 따라가도록(사용자 요청, 2026-07-23).
@@ -155,8 +317,14 @@ async function main() {
         const opt = state.routeResult.options[state.selectedOptionIndex];
         const coords = opt.fullRouteCoords.length > 0 ? opt.fullRouteCoords : opt.trackCoords;
         adsb.setRouteCoords(coords);
+        refreshSidStar(state.dep, state.arr);
       } else {
         adsb.setRouteCoords(null);
+        // 선택 해제 시에도 세대 토큰을 증가시켜야 한다 — 안 그러면 이미 늦게 도착한
+        // 이전 선택의 SID/STAR 응답이 seq 검사를 그대로 통과해 방금 지워진 레이어를
+        // 다시 채워 넣는다(리뷰 지적사항, 2026-07-23).
+        sidStarSeq += 1;
+        routeLayers.renderSidStar([]);
       }
     }
     if (event.type === "viewmode:changed") {
@@ -164,16 +332,19 @@ async function main() {
     }
   });
 
-  const chipEl = document.getElementById("adsb-chip");
-  adsb.start(chipEl);
-  // 방어적 정리(향후 SPA 라우팅 전환 대비) — 정적 단일 페이지라 필수는 아니나 폴링 타이머를 명시적으로 멈춘다.
-  window.addEventListener("beforeunload", () => adsb.stop());
-
   try {
     await bootMinimal();
   } catch (err) {
     toast(`초기 데이터 로드 실패: ${err.message}`);
   }
+
+  // bootMinimal 이후에 시작해야 첫 폴링부터 우리나라 FIR로 맞춰진 지도 중심을 기준으로
+  // 조회한다(boot:ok 핸들러가 위에서 이미 fitBounds 적용) — bootMinimal 이전에 시작하면
+  // 첫 폴링은 여전히 CONFIG.map.center(세계뷰 기본값)를 기준으로 나가 버린다.
+  const chipEl = document.getElementById("adsb-chip");
+  adsb.start(chipEl);
+  // 방어적 정리(향후 SPA 라우팅 전환 대비) — 정적 단일 페이지라 필수는 아니나 폴링 타이머를 명시적으로 멈춘다.
+  window.addEventListener("beforeunload", () => adsb.stop());
 }
 
 main().catch((err) => {

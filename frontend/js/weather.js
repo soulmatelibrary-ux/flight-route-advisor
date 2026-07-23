@@ -85,7 +85,12 @@ export function riskOf(m) {
 /** 직접→로컬 프록시→공개 프록시 순 폴백, 성공 경로 기억(문서 03/05/07, net.js). */
 async function awc(path, params) {
   const CONFIG = getConfig();
-  const base = path === "metar" ? CONFIG.weather.metarUrl : CONFIG.weather.tafUrl;
+  const base = {
+    metar: CONFIG.weather.metarUrl,
+    taf: CONFIG.weather.tafUrl,
+    isigmet: CONFIG.weather.sigmetUrl,
+    pirep: CONFIG.weather.pirepUrl,
+  }[path];
   const qs = new URLSearchParams({ format: "json", ...params }).toString();
   const data = await fetchJsonWithFallback(`${base}?${qs}`);
   return data;
@@ -98,6 +103,27 @@ export async function getMetar(ids) {
 
 export async function getTaf(ids) {
   const data = await awc("taf", { ids });
+  return Array.isArray(data) ? data : [];
+}
+
+/** 국제 SIGMET 전체(전세계, 서버측 필터 없음 — 문서/07 §2.4와 달리 지도 레이어는 클라이언트가 직접 bbox로 걸러 그린다). */
+export async function getSigmets() {
+  const data = await awc("isigmet", {});
+  return Array.isArray(data) ? data : [];
+}
+
+/** PIREP 조회 — icao+distanceNm(반경) 또는 bbox 중 하나 필수(문서/07 §2.3과 동일 계약). */
+export async function getPireps({ icao, distanceNm = 200, bbox, hours = 3 } = {}) {
+  const params = { age: hours };
+  if (icao) {
+    params.id = icao;
+    params.distance = distanceNm;
+  } else if (bbox) {
+    params.bbox = bbox;
+  } else {
+    throw new Error("getPireps: icao 또는 bbox 중 하나가 필요함");
+  }
+  const data = await awc("pirep", params);
   return Array.isArray(data) ? data : [];
 }
 

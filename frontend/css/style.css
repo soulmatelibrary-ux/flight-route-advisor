@@ -81,6 +81,13 @@ html, body {
 .flow-items li .row2 { color: var(--ink-soft); margin-top: 2px; }
 #flow-more-btn { margin-top: 6px; }
 
+.ops-result {
+  margin: 8px 0 0; padding: 8px; border: 1px solid rgba(34,48,60,0.15); border-radius: 6px;
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-size: 12px;
+}
+.ops-result dt { color: var(--ink-soft); }
+.ops-result dd { margin: 0; font-weight: 600; text-align: right; }
+
 .route-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .route-options li {
   border: 1px solid rgba(34,48,60,0.15); border-radius: 6px; padding: 8px; font-size: 12px; cursor: pointer;
@@ -89,6 +96,10 @@ html, body {
 .route-options li .row1 { display: flex; justify-content: space-between; font-weight: 600; }
 .route-options li .delta-red { color: #c0392b; }
 .route-options li .row2 { color: var(--ink-soft); margin-top: 2px; }
+/* 후보 간 지연율 상대 비교 배지(과거 통계 기반, 2026-07-23) — 절대 임계값 아님, 이
+   OD의 후보들 안에서 최저/최고만 표시. */
+.route-options li .tag-good { color: var(--green); font-weight: 600; }
+.route-options li .tag-warn { color: #c0392b; font-weight: 600; }
 
 .error { color: #c0392b; font-size: 12px; }
 
@@ -100,9 +111,19 @@ html, body {
   background: var(--paper);
 }
 
+#radar-bar {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 500;
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: var(--paper); border: 1px solid var(--ink); border-radius: 20px;
+  font-size: 12px;
+}
+#radar-play-btn { border: none; background: none; cursor: pointer; font-size: 14px; padding: 0 4px; }
+#radar-slider { width: 160px; }
+
 .fir-chain { display: flex; flex-wrap: wrap; gap: 6px; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
 .fir-chain .fir-badge { border: 1px solid var(--ink); border-radius: 4px; padding: 2px 6px; }
 
+.route-ops-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
 .route-fois-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
 
 .weather-popup { font-size: 12px; max-width: 260px; }
@@ -115,8 +136,10 @@ html, body {
 #toast-root { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 2000; }
 .toast { background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 6px; font-size: 12px; margin-top: 6px; }
 
-.aircraft-icon { color: #f1c40f; font-size: 14px; text-shadow: 0 0 2px #000; }
-.aircraft-label { font-family: "IBM Plex Mono", monospace; font-size: 10px; white-space: nowrap; }
+.aircraft-icon { display: block; transform-origin: center; }
+.aircraft-label { font-family: "IBM Plex Mono", monospace; font-size: 10px; white-space: nowrap; line-height: 1.3; }
+.aircraft-label-cs { font-weight: 700; color: var(--ink); }
+.aircraft-label-route { color: var(--ink-soft); font-size: 9px; }
 
 .ref-label {
   font-family: "IBM Plex Mono", monospace;

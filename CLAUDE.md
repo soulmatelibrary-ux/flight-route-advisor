@@ -21,7 +21,14 @@
 | [docs/07-checklist.md](docs/07-checklist.md) | **진행 기준점**(순차 개발 체크리스트) |
 | [docs/08-setup-and-dev-order.md](docs/08-setup-and-dev-order.md) | env 루트·로컬 pgsql 기동·순차 개발 순서 |
 | [docs/09-review-notes.md](docs/09-review-notes.md) | 문서 리뷰 문제점·개선점 로그 |
+| [docs/10-ui-and-realtime.md](docs/10-ui-and-realtime.md) | UI 방향(결정 중심)·실시간 로드맵 |
+| [docs/11-ai-route-reasoning-proposal.md](docs/11-ai-route-reasoning-proposal.md) | AI 경로추천 근거화 — 분석·결정표(§12 확정, [14]가 단일출처) |
+| [docs/12-operational-goal-and-scenarios.md](docs/12-operational-goal-and-scenarios.md) | 운영 목표·의사결정 시나리오(프로젝트의 "왜") |
+| [docs/13-ai-reasoning-dev-plan.md](docs/13-ai-reasoning-dev-plan.md) | AI 근거화 **구현 스펙**(방향 A, STEP·수용기준·보안 단일출처) |
+| [docs/14-improvement-request.md](docs/14-improvement-request.md) | AI 근거화 **개선요구서 v1.0**(결정 확정 단일출처) |
 | [data-ingestion-backend/docs/](data-ingestion-backend/docs/) | 전처리 적재 백엔드 문서(미러) — Stage0 근거 |
+
+> ⚠ **docs 11~14는 "AI 경로추천 근거화" 추가개발 묶음**(현재 빌드 완료 후 착수, [13 §0](docs/13-ai-reasoning-dev-plan.md) 게이트). 읽는 순서: **12(왜) → 11(분석) → 14(확정 결정) → 13(구현 STEP)**.
 
 ## 0.1 외부 자산은 env 경로로 참조한다 (복사·수정 금지)
 

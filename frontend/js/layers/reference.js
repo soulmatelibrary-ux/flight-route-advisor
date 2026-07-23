@@ -17,15 +17,12 @@
  * 실시간 변조 경로가 없지만, ADS-B/기상 레이어와 동일한 방어를 일관되게 적용한다.
  */
 import { escapeHtml } from "../html.js";
-import { normalizeWinding } from "../geo.js";
+import { normalizeWinding, shiftRing } from "../geo.js";
 
 const L = window.L;
 
-function shiftRing(ring, deltaLon) {
-  return ring.map(([lat, lon]) => [lat, lon + deltaLon]);
-}
-
-export function createReferenceLayers(map, CONFIG) {
+export function createReferenceLayers(map, CONFIG, hooks = {}) {
+  const { onFirClick } = hooks;
   const canvasRenderer = L.canvas({ padding: 0.4 });
   const groups = {
     firs: L.layerGroup(),
@@ -58,6 +55,11 @@ export function createReferenceLayers(map, CONFIG) {
       layer.on("mouseover", () => layer.setStyle({ fillOpacity: 0.16 }));
       layer.on("mouseout", () => layer.setStyle({ fillOpacity: 0.04 }));
       layer.bindPopup(`<b>${escapeHtml(fir.icao)}</b><br>${escapeHtml(fir.nameEn)}`);
+      // 지역컨텍스트에서 홈 FIR·경로 FIR 바깥은 항로/픽스가 기본적으로 안 보이는데(위
+      // relevantFirBounds 설계), 사용자가 특정 FIR을 직접 클릭해 살펴보고 싶을 수 있다
+      // (사용자 피드백, 2026-07-23) — 클릭한 FIR은 main.js가 "고정(pinned)"으로 기억해
+      // 그 FIR도 항로/픽스 필터 범위에 포함시킨다.
+      if (onFirClick) layer.on("click", () => onFirClick(fir.icao));
       layer.addTo(groups.firs);
       if (fir.label) {
         L.marker([fir.label.lat, fir.label.lon], {
@@ -112,9 +114,12 @@ export function createReferenceLayers(map, CONFIG) {
   function renderWaypoints(rows) {
     clear("waypoints");
     for (const wp of rows) {
+      // 외국 픽스는 우리나라보다 더 작게(사용자 피드백, 2026-07-23) — main.js가 이미
+      // 우리나라+관련 FIR로 걸러서 넘기므로 여기선 크기만 구분한다.
+      const isHome = wp.country === CONFIG.display.homeWaypointCountry;
       L.circleMarker(wp.latlng, {
         renderer: canvasRenderer,
-        radius: 1.5,
+        radius: isHome ? CONFIG.display.waypointRadius.home : CONFIG.display.waypointRadius.foreign,
         color: CONFIG.tokens.inkSoft,
         weight: 1,
         fillColor: CONFIG.tokens.paper,

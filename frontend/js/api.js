@@ -73,8 +73,14 @@ export const api = {
   airports: ({ bbox, type, icao } = {}) => getJson("/reference/airports", { bbox, type, icao }),
   navaids: ({ bbox } = {}) => getJson("/reference/navaids", { bbox }),
   waypoints: ({ bbox, limit } = {}) => getJson("/reference/waypoints", { bbox, limit }),
+  sidstar: ({ airport } = {}) => getJson("/reference/sidstar", { airport }),
   foisDelays: ({ direction, airport, dateFrom, dateTo } = {}) =>
     getJson("/fois/delays", { direction, airport, date_from: dateFrom, date_to: dateTo }),
   flowManagement: ({ dateFrom, dateTo, fir, airway, limit, offset } = {}) =>
     getJson("/flow-management", { date_from: dateFrom, date_to: dateTo, fir, airway, limit, offset }),
+  airportOps: ({ icao, dateFrom, dateTo } = {}) =>
+    // icao는 경로 세그먼트라 buildQuery()의 URLSearchParams 인코딩을 안 타므로 직접
+    // encodeURIComponent — 서버가 형식(4자리 영문)을 검증하지만 클라이언트에서도
+    // 경로 주입 문자(/,?,#)가 그대로 URL에 섞이지 않도록 방어(docs/06 §8).
+    getJson(`/airports/${encodeURIComponent(icao)}/ops`, { date_from: dateFrom, date_to: dateTo }),
 };

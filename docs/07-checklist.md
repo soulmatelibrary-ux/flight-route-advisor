@@ -140,24 +140,77 @@
 - [x] uvicorn+curl로 실제 OD 쌍(RKPC→RKSS)의 dep/arr FOIS 응답 확인(RKPC 1702건, RKSS 1108건, 상위원인 정상 파싱) + 데이터 없는 공항(ZZZZ) 조회 시 `total=0`로 정상 처리되는 경로 확인.
 - [x] 공통 게이트(하드코딩·시큐어코딩·리뷰에이전트) 통과 — `senior-code-reviewer`가 seq 가드(flow-management의 `moreBtn.disabled` 부류 버그 없음 확인)·`Promise.allSettled` 인터리빙·`od:error` 시 잔여 텍스트 없음·어댑터/XSS/신규 백엔드 표면 없음을 전부 확인. 발견된 이슈 없음(Go).
 
+## 2단계 — 공항 운항 KPI(ACDM) 패널 (착수, 2026-07-23)
+
+> 근거: [03 §4.2](./03-backend-api.md), [05](./05-mvp-scope.md) §3. 사용자 요청으로 2단계 잔여 중 착수(경로 기하 동적화·상층풍/시어·참조 타일화·기상 레이더/SIGMET·PIREP과 함께 지시됐고, 그중 가장 난이도·선행조건이 낮아 먼저 구현).
+
+- [x] `backend/app/queries/airport_ops.py`(신규) — `latest_run.latest_view()`로 `processed_acdm_departure`/`processed_acdm_arrival` 조회, `airport_icao`+선택적 `date_from`/`date_to` 필터. **실측으로 발견한 함정**: 이 KPI 컬럼들(`departure_punctuality_min` 등 5종)이 DB에 **text**로 저장돼 있어(스킬의 `number_text()`가 NaN을 NULL이 아닌 빈 문자열로 직렬화) `text <= integer` 비교가 Postgres 에러(`operator does not exist`)로 죽는 것을 실측 확인 → `_numeric()` 헬퍼(`nullif(col,'')::numeric`)로 해결. `ctot_slot_adherence`는 숫자가 아니라 범주 문자열("조기"/"준수"/"지연"만 판정 모집단, "CTOT없음"/"계산불가" 제외)이라는 것도 원본 스킬 코드(`prepare_acdm_departure_core5.py`)를 직접 읽어 확인 후 반영. **`on_time_rate` 15분 임계값은 원본 어디에도 없어(부호·단위만 정의) EUROCONTROL/ICAO 산업표준 On-Time Performance 정의를 이번에 확정**(코드/문서에 근거 남김, [03 §4.2](./03-backend-api.md) 참고 — 도메인 판정값이라 재검토 여지 있음).
+- [x] `backend/app/routers/airports.py`(신규, `GET /api/airports/{icao}/ops`) — ICAO 4자리(Path+정규식 이중 검증)·날짜(`date.fromisoformat()` 캘린더 검증, FOIS 리뷰에서 나온 패턴 그대로 반영)·역전 400, DB 연결 실패 503. `main.py`에 라우터 등록.
+- [x] 프론트 `js/ops-panel.js` + `js/api.js:airportOps` + `js/adapters.js:toAirportOpsSummary` — FOIS/흐름관리 패널과 동일하게 store.js 전역 상태와 무관, `<form>`+submit(Enter 키 제출), 조회 세대(seq) 토큰. 결과는 `textContent`만 사용(HTML 삽입 없음).
+- [x] uvicorn+curl 종단 확인 + **독립 psql 쿼리로 응답값 전부 직접 대조**(RKSI 출발 19,606편·정시율 0.7805·CTOT준수 1207/1277=0.9452, 도착 19,580편 등 소수점까지 일치) + 데이터 없는 공항(ZZZZ→전부 null, 에러 아님)·기간필터·에러케이스(icao 길이 422, 날짜역전 400, 존재하지 않는 날짜 400) 확인. 프론트는 Node에 최소 DOM 스텁을 씌워 실제 백엔드에 붙여 정상조회·클라이언트 검증·빈 데이터·경쟁조건(세대 토큰) 4가지 시나리오 테스트 통과.
+- [x] 공통 게이트(하드코딩·시큐어코딩·리뷰에이전트) 통과 — `senior-code-reviewer`가 신규 3파일 + 5개 파일 diff(`main.py`/`api.js`/`adapters.js`/`style.css`/`index.html`) 리뷰, 원본 스킬 소스까지 직접 대조해 text 캐스팅·CTOT 분모/분자·15분 임계값 채택 타당성 검증. Critical/High 없음. Low 2건: ①이 문서(§4.2)가 원래 원시 컬럼(`ttot/ctot/eldt/aldt`)을 쓸 것처럼 적혀 있던 문서 드리프트 → 구현(파생 KPI 컬럼만 사용)에 맞게 갱신 완료, ②`_validate_date`에 `.strip()` 누락은 `fois.py`와 동일한 기존 관례라 이번 diff가 만든 새 문제 아님(미수정, 향후 일괄 정리 대상). **리뷰어 권고**: 15분 임계값 채택은 타당한 산업표준 적용이나 도메인 판정을 바꾸는 결정이라 사용자 재확인 권장 — 사용자 확정(2026-07-23): 15분 기준 그대로 채택.
+
+## 2단계 — 기상 레이더(RainViewer) + 위험기상(SIGMET/PIREP) 토글 (착수, 2026-07-23)
+
+> 근거: [10 §2.5](./10-ui-and-realtime.md) 레이어④·⑤. 사용자 요청으로 ACDM KPI 다음 착수. 프론트 전용(백엔드 변경 없음) — AWC(SIGMET/PIREP)는 기존 METAR/TAF와 동일한 CORS 프록시 폴백 체인 재사용, RainViewer는 CORS `*` 허용이라 직접 호출.
+
+- [x] `frontend/js/layers/radar.js`(신규) — `api.rainviewer.com/public/weather-maps.json` 온디맨드 조회(레이어 토글 on 시), `radar.past`(과거 2시간 프레임)를 타일레이어로 로드해 재생바(`#radar-bar`)로 프레임 전환. `maxNativeZoom:6`(원본 문서/05 트러블슈팅 "Zoom Level Not Supported" 회피).
+- [x] `frontend/js/layers/hazards.js`(신규) — AWC `isigmet`/`pirep` 조회해 SIGMET은 폴리곤(`geom`이 AREA/AREAS 두 형태인 실제 응답을 실측 확인해 통일 처리, 퇴화 링 필터링), PIREP은 원형 마커로 토글 레이어에 렌더. 팝업 전부 `escapeHtml` 경유.
+- [x] `frontend/js/weather.js` — `awc()`의 path→URL 매핑을 4종(metar/taf/isigmet/pirep)으로 확장, `getSigmets()`/`getPireps()` 추가(기존 폴백 체인 그대로 재사용). `config.js`/`config.example.json`에 `weather.sigmetUrl/pirepUrl`, `radar.*`(URL·타일 파라미터·재생 간격) 추가.
+- [x] `main.js` — 레이어 컨트롤에 "SIGMET(위험기상)"·"PIREP"·"기상 레이더" 3항목 추가(전부 기본 OFF), `overlayadd`에서 온디맨드 조회(SIGMET 전세계 1회, PIREP은 현재 지도 뷰포트 bbox).
+- [x] **의도적으로 축소한 범위**: [10 §2.5](./10-ui-and-realtime.md) ④ 원안의 "루트 교차 시 지도 경고 마커 + 근거 패널 칩(TS·ICE·TURB)" 중 경로-폴리곤 교차판정 로직은 이번에 미구현 — 원본 어디에도 판정 알고리즘 근거가 없어 발명하지 않음(허위 정보 생성 금지 원칙). 이번엔 토글 레이어로 지도에 SIGMET/PIREP을 표시하는 것까지만 구현, 교차판정은 사용자 확인 후 별도 착수 여부 결정.
+- [x] 실측 검증: 실제 AWC/RainViewer API에 curl로 직접 붙어 스키마 확인(SIGMET `coords`가 geom값에 따라 다른 모양, PIREP 필드, RainViewer 프레임/타일 URL) — 허위 필드 생성 없이 실제 응답 기준으로 구현. Node에 Leaflet/DOM 최소 스텁을 씌워 실제 API에 붙여 SIGMET 111건 조회·110건 렌더(1건 좌표 없음 정상 드롭)·AREAS 멀티링 정상 파싱·PIREP 78건 렌더·escapeHtml로 XSS 실제 재현 후 무력화 확인·RainViewer 11프레임 로드+단일 프레임 표시 확인.
+- [x] 공통 게이트(하드코딩·시큐어코딩·리뷰에이전트) 통과 — `senior-code-reviewer` 리뷰에서 Critical/High(보안) 없음, High 1건(예외처리) + Medium 2건 발견·전부 수정: ①SIGMET/PIREP 조회 실패 시 조용히 빈 레이어로만 남아 "위험기상 없음"과 "조회 실패"를 구분 못하던 것 → `toast()` 호출 추가(기존 boot/od 실패와 동일 컨벤션 통일) ②`radar.js`의 `loaded` 플래그가 최초 로드 후 리셋되지 않아 토글을 껐다 켜도 오래된 프레임에 계속 머물던 버그 → `overlayremove`에서 리셋해 재토글 시 항상 재조회하도록 수정(재수정 후 Node 스모크로 재검증: 재토글 시 실제로 재fetch됨 확인) ③레이더 프레임 조회 실패 시 재생바가 무반응 상태로만 남던 것 → "레이더 로드 실패" 라벨 표시로 수정. Low 1건(SIGMET/PIREP `overlayadd` 핸들러에 seq 가드 없음)도 함께 수정(selectOd/setViewMode와 동일한 세대 토큰 패턴 적용).
+
 ## 향후 확장 (범위 밖 — 착수 시 별도 체크리스트)
-- [ ] 2단계 잔여: 경로 기하 동적(04-D)·상층풍/시어(04-E)·참조 타일화·공항 운항 KPI(ACDM, `/api/airports/{icao}/ops`)·기상 레이더(RainViewer)·SIGMET/PIREP 토글
+- [ ] 2단계 잔여: 경로 기하 동적(04-D)·상층풍/시어(04-E)·참조 타일화·SIGMET/PIREP 루트 교차 판정(위 "의도적으로 축소한 범위" 참고)
 - [ ] 3단계: 실시간 STCA/CPA·흐름관리 탭(**통합데이터·영향상세 테이블 선행**, 비행편 영향 결합)·FIR 분석 패널
 
-### 계획(미착수, 검토 중) — FOIS 원인 기반 경로 추천 근거화
+### 계획(확정 v1.0, 착수 대기) — AI 경로추천 근거화 (docs 11~14)
 
-> 위 "노선-FOIS 라이트 연동"의 실사용 피드백을 먼저 지켜본 뒤 착수 여부를 판단한다(사용자 확정, 2026-07-23). 아래는 착수 시 참고할 설계 메모이지 체크리스트가 아니다.
+> ✅ **결정 확정**: [14-improvement-request](./14-improvement-request.md) v1.0(2026-07-23) — 방향 A(**완성본 결정론 로직 이식 우선 + 그 위 얇은 LLM 서술층**) + 실시간 ADS-B. 구현 스펙 = [13-ai-reasoning-dev-plan](./13-ai-reasoning-dev-plan.md), 배경 분석 = [11](./11-ai-route-reasoning-proposal.md)/[12](./12-operational-goal-and-scenarios.md).
+> ⚠ **착수 게이트**([13 §0](./13-ai-reasoning-dev-plan.md)): 아래 STEP은 **현재 빌드(위 "향후 확장"의 2단계 잔여 + 필요한 3단계분) 완료 후에만** 착수한다. 그 전까지 전부 미착수 유지. 각 STEP은 공통 게이트(하드코딩·시큐어코딩·리뷰에이전트)를 그대로 적용하고, 완료 시 관련 문서([13 §10](./13-ai-reasoning-dev-plan.md)) 동기화. **STEP 순서·수용기준·보안 규약은 [13](./13-ai-reasoning-dev-plan.md)이 단일 출처**(여기 목록은 진행 추적용).
+> 이전 "FOIS 원인 기반 근거화" 검토 메모는 이 계획에 **흡수**됨 — 당시 미확정 4건은 doc 14에서 해소: FOIS는 공항 단위 유지·`reason` 원문 제외(D7)·순위는 결정론이 정하고 AI는 근거 서술만(D2)·"참고 정보" 톤 유지.
 
-- **아이디어**: FOIS `cause_major`/`cause_process`(예: "ATFM·관제")가 관제·항로 혼잡성과 관련된 항목이면, 그 노선이 실제로 경유하는 FIR·항공로와 연관 지어 경로 옵션에 "관제 지연 이력 있음" 같은 배지나 순위 조정 근거로 반영.
-- **착수 전 확정 필요(선행 미확정 사항)**:
-  1. FOIS는 공항 단위 집계이지 FIR/항공로 단위가 아니다 — `cause_process`가 무엇이든 어느 FIR·항공로 구간에서 발생했는지 나타내는 물리 컬럼이 없다. `reason` 자유텍스트에 항로/FIR 명이 언급되는 경우가 있을 수 있으나 파싱 신뢰도 검증이 안 됐다. 원인-경로 연결 근거를 어떻게 확보할지(키워드 매칭 vs 통계적 상관관계 vs 공항 단위 배지로 범위 축소) 결정 필요.
-  2. 상관관계를 인과관계처럼 오인시키지 않을 UI 문구/톤 설계 필요 — 지금의 "참고 정보" 수준 문구를 유지할지, 배지로 격상할지.
-  3. 경로 옵션 순위(추천 우선순위) 자체를 바꾸는 로직으로 갈지, 참고 배지만 추가하고 순위는 그대로 둘지 — 후자가 안전하지만 사용자가 원하는 "추천"에는 못 미칠 수 있음.
-  4. `cause_major`/`cause_minor`/`cause_process`/`involved_party` 분류 체계가 안정적인 코드값인지, 스킬 산출 시마다 자유 표기가 흔들릴 수 있는지 실측 검증 필요(§Stage 0의 "제외 건수 기록" 사례처럼 원본 데이터 변동성이 실제로 있었던 전례 있음).
-- **착수 신호**: 1단계 실사용 피드백에서 "지금 이상의 노선별 근거가 필요하다"는 신호가 나오면 위 미확정 사항부터 확정한 뒤 별도 체크리스트로 착수.
+**Phase A — 결정론 신호 이식 (AI 아님)**
+- [ ] A1 흐름관리 OD·경로별 영향률 서빙 + 노선 위젯 (`batch/build_flow.py`→`flow.json`→`queries/flow_reasoning.py`→`GET /api/routes/flow`→`route-flow-summary.js`)
+- [ ] A2 OD 지연원인 분해 서빙 (`odhr.json`→`GET /api/routes/delay-history`, FOIS reason 원문 제외 D7)
+- [ ] A3 상층풍·시어·추천고도 (client-side, **완성본과 동일 외부 API·URL은 config** C-6) — `frontend/js/layers/wind.js`
+- [ ] A4 실시간 ADS-B 섹터 교통·수요예측 (+10/40분 대권 외삽, 임계값 config, **순수함수 단위테스트로 완성본 동일 출력** 고정) — `frontend/js/analyze-sectors.js`
+- [ ] A5 세그먼트 병목 신호 종합(1단계 부분힌트) — `frontend/js/route-bottlenecks.js`
+- [ ] A6 터미널 신호 이식(진출입 게이트·출발 활주로 분포, ODR2 `odInfo`→`/api/routes` 노출) — D20 확정
+
+**Phase B — 통합기 (reasoning context)**
+- [ ] B1 `reasoningContext` 스키마 v1.0 확정([13 §7](./13-ai-reasoning-dev-plan.md)) — 민감도 태그 `public`/`masked`/`restricted`(§7.1) 포함
+- [ ] B2 context 어셈블러 순수함수 — `frontend/js/reasoning-context.js`
+- [ ] B-exit Phase B→C 전환 기준 충족 확인([13 §5.1](./13-ai-reasoning-dev-plan.md): 스키마 v1.0·필드 충족·결측 null·민감도 태그·순수성)
+
+**Phase C — LLM 서술층 (얇은 층, D1 수동복붙)**
+- [ ] C1 프롬프트 템플릿 + 골든예시(완성본 `castScript` 재활용) + 출력 JSON 스키마(D6)
+- [ ] C2 "AI 근거 보기" 버튼(D5) + 프롬프트 복사 + 응답 붙여넣기 UI — `frontend/js/reasoning-panel.js`
+- [ ] C3 응답 검증·파싱·안전렌더 (스키마 검증·textContent·XSS 방어 — 신뢰 불가 입력)
+- [ ] C4 모드 C 백엔드 프록시 스켈레톤(**미활성** D9, 키 env·요청량 제한·로그 규약만)
 
 ### 알려진 이슈 → 수정 완료 (2026-07-23)
 - [x] `frontend/js/main.js`의 `focusAirportsFor()`가 boot 시 가져온 민간/공용(A/B) 타입 공항만 필터링 — OD의 출발/도착 공항이 군용/기타(C/D) 타입이면 결정 포커스 모드에서 마커가 조용히 사라지던 문제(2026-07-23 2차 리뷰에서 발견, flow-management 작업과 무관해 당시 미수정). 실측으로 실재 확인: RKSO(Osan AB, type C) 등 391개 실제 OD 페어의 dep/arr 44종이 부트 A/B 목록에 없었음.
   - 수정: `backend/app/reference/loader.py:load_airports()`·`routers/reference.py`에 `icao` 파라미터 추가(`load_firs`와 동일 규약 — 있으면 bbox/type 완전히 무시). `frontend/js/api.js:airports()`가 `icao` 전달, `frontend/js/store.js`에 `ensureAirportsLoaded(icaos)` 추가해 `selectOd()`에서 `loadFocusReference`와 병렬로 dep/arr 누락분만 타입 무관 보강 조회, `derived.airportByIcao`/`bootAirports`에 병합(중복 fetch/push 방지용 `pendingAirportIcaos` 가드 포함).
   - `senior-code-reviewer` 리뷰 1회 진행, Medium 1건 수정: 라우터의 `type` Query가 `pattern` 검증을 icao 유무와 무관하게 먼저 걸어 "icao 있으면 type 무시" 규약이 `type` 형식 자체엔 안 지켜지던 것 발견 → Query pattern 제거하고 loader 내부(icao 없을 때만 실행되는 분기)에서만 검증하도록 이동, `bbox`와 동일 패턴으로 통일. 문서 동기화([03 §3](./03-backend-api.md) 표에 `icao` 필터 추가) 함께 처리.
   - uvicorn+curl 종단 확인: A/B 회귀(3,457건 동일)·군용 단건 조회(RKSO type=C 정상 반환)·icao+bbox/무효type 동시 지정 시 icao 우선(200)·icao 없이 무효 type만(400, 회귀 유지). Node로 실제 `store.js`/`api.js`를 백엔드에 붙여 `selectOd("RKSO","RKPK")` 실행 후 `focusAirportsFor` 결과에 RKSO 포함 확인, 재조회·동시 요청 2종 모두 중복 push 없음 확인.
+
+### 사용자 요청 반영 (2026-07-23) — 지역컨텍스트 FIR 클릭 시 항로 표시
+- [x] **문제**: `main.js`의 `relevantFirBounds()`가 지역컨텍스트(bulk) 뷰에서 항로·항행시설·픽스를 홈 FIR(RKRR)+선택된 경로의 경유 FIR로만 제한한다(번잡함 방지, 기존 설계). OD(노선)를 아직 선택하지 않은 상태에서는 ZSHA(상하이)·RCAA(타이베이)·RJJJ(후쿠오카) 같은 외국 FIR 쪽엔 항로가 전혀 안 보여서 사용자가 지도를 훑어보다 혼동하는 상황 확인(스크린샷 제보).
+- [x] **수정**: FIR 폴리곤을 클릭(팝업이 열리는 동작)하면 그 FIR의 ICAO를 `main.js` 내부 `pinnedFirIcaos`(Set, 뷰 전용 상태)에 추가하고 `relevantFirBounds()`가 이를 홈 FIR·경로 FIR과 함께 포함하도록 함(`frontend/js/main.js`, `frontend/js/layers/reference.js`의 `createReferenceLayers(map, CONFIG, { onFirClick })` hook 추가). 팝업이 닫히지 않도록 FIR/공항 레이어는 다시 그리지 않고 항로·항행시설·픽스만 재필터링하는 `applyBulkOverlayFilters()`로 분리.
+- [x] `code-reviewer` 리뷰 통과 — 클릭 핸들러 결선(`onFirClick` → hooks → `layer.on("click")`), `applyBulkOverlayFilters`의 함수 선언 호이스팅, 결정 포커스 모드에서 클릭 시 즉시 반영 안 되고 지역컨텍스트 전환 시 자동 적용되는 동작, `pinnedFirIcaos`(최대 247개 문자열) 메모리 영향 없음, 기존 `renderForCurrentState()` bulk 분기 동작 회귀 없음, escapeHtml 경계 미변경(새 DOM 삽입 없음) 전부 확인. Critical/High 없음.
+- [x] `node --check`로 `main.js`/`layers/reference.js` 구문 확인.
+
+### 사용자 요청 반영 (2026-07-23) — 초기 부팅 기본값: 우리나라 FIR·항로·실시간 항공기
+- [x] **문제**: `store.js`의 `bootMinimal()`이 `loadFocusReference([])`로 우리나라(홈 FIR, RKRR) FIR·경계 안 항공로·픽스를 이미 계산해 `state.focusFirs`/`focusAirways`/`focusWaypoints`에 담아두는데, `main.js`의 `boot:ok` 핸들러가 `renderAirports()`만 호출하고 `renderFirs`/`renderAirways`/`renderWaypoints`를 호출하지 않아 첫 화면이 빈 지도로 보이던 버그(사용자 스크린샷 제보). 또한 지도가 `CONFIG.map.center`(세계뷰, zoom 3) 그대로 열려 우리나라로 fit되지 않아, 노선 미선택 시 지도 중심 기준으로 폴링하는 실시간 항공기(`layers/adsb.js`)도 엉뚱한 위치를 조회하고 있었음.
+- [x] **수정**: `main.js`의 `boot:ok` 핸들러가 기존 `renderForCurrentState()`(다른 이벤트에서 이미 쓰던 헬퍼)를 호출하도록 변경 + 홈 FIR 폴리곤 bounds(`geo.js`의 `boundsOfPolygons`, Leaflet corner-pair 포맷으로 변환)로 `map.fitBounds()` 추가. `adsb.start(chipEl)` 호출 시점을 `bootMinimal()` 완료 이후로 이동해 첫 폴링부터 우리나라 FIR로 맞춰진 지도 중심을 기준으로 조회하도록 함(이전엔 `bootMinimal` 이전에 시작해 첫 폴링만 옛 세계뷰 중심으로 나가던 문제).
+- [x] `code-reviewer` 리뷰 통과 — `boundsOfPolygons`→`fitBounds` 포맷 변환 정확성, `boot:ok` 시점에 `state.derived.firByIcao` 채워짐 보장(레이스 없음), `renderForCurrentState()`가 기존 부팅 동작(공항 렌더)의 상위집합임을 확인. 리뷰 지적사항 2건 반영: ①ADS-B 첫 폴링이 fitBounds 적용 전 발생하던 문제(위 수정으로 해소) ②새 렌더/fitBounds 블록에서 예외 발생 시 `bootMinimal`의 catch로 잘못 전파돼 "초기 데이터 로드 실패" 토스트가 오표시되는 것을 막기 위해 자체 try/catch로 격리.
+- [x] `node --check`로 `main.js` 구문 확인.
+
+### 사용자 요청 반영 (2026-07-23) — 항공기 클릭 시 지나온/도착 예상 경로 표시
+- [x] **요청 배경**: 항공기 클릭 팝업(고도·속도·노선)에 추가로 "지나온 경로"·"도착 경로"도 지도에 표시해달라는 요청. 조사 결과 무료 ADS-B API(`adsb.lol`, `adsbdb.com`) 어디도 개별 항공편의 실제 웨이포인트 항로는 주지 않고 출발/도착 공항 코드까지만 준다(`PORTING_PACKAGE_ROOT`의 완성본 HTML도 `adsb.lol/api/0/route/{callsign}`를 동일하게 공항코드 조회 용도로만 씀, 확인 후 사용자에게 보고). 사용자 확인: 실제 항로 대신 이 앱 백엔드의 경로추천(ODR2, `/api/routes`) 데이터를 재활용하기로 결정 — 실측으로 확인한 실제 사례(ZBAA→RKSI 289편)처럼 advisor DB에 있는 OD 쌍이면 이 경로를 근사치로 사용.
+- [x] **구현**(`frontend/js/layers/adsb.js`): 항공기 클릭 시 `showAircraftDetail`에서 adsbdb로 얻은 출발/도착 ICAO로 `api.routes(dep,arr)` 조회 → 옵션의 `full_route_coords`(없으면 `track_coords`)를 현재 항공기 위치에서 가장 가까운 지점 기준으로 분할해 지나온 구간(실선)·도착 예상 구간(점선, `routeGuessGroup` 레이어)으로 그림. advisor DB에 없는 OD 쌍(세계 임의 항공편, 대다수)이면 조용히 생략 — 지어내지 않음. 팝업에 "실제 항로가 아니라 경로추천 데이터 기반 추정치"임을 명시. 팝업을 닫거나 다른 항공기를 클릭하면 이전 추정선을 지움(`routeGuessSeq` 세대 토큰 + `popup.on("remove")`).
+- [x] `code-reviewer` 리뷰 통과 — Critical 1건 발견·수정: 날짜변경선을 넘는 노선(한국↔미국 등, 이 파일이 `unwrapLongitudes`를 쓰는 바로 그 이유)에서 분할 지점(`nearestIndex`)을 언랩 후 좌표로 계산해 노선 반대쪽 끝으로 튀던 버그 → 언랩 전(raw, ADS-B 원시 경도와 동일 convention) 좌표로 계산하도록 수정, node 스크립트로 재현·해소 확인. 그 외 지적사항 1건도 반영: 팝업을 닫아도 진행 중이던 조회가 늦게 도착하면 설명 없이 경로선만 남던 문제 → `remove` 핸들러에서 `routeGuessSeq`도 함께 무효화. XSS(escapeHtml 경계)·예외처리(advisor DB에 없는 OD 쌍의 404 등)는 문제없음 확인.
+- [x] `node --check`로 `layers/adsb.js` 구문 확인.

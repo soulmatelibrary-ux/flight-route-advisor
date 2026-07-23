@@ -5,6 +5,8 @@
  */
 import { api, ApiError } from "./api.js";
 import * as adapt from "./adapters.js";
+import { getConfig } from "./config.js";
+import { boundsOfPolygons, unionBounds } from "./geo.js";
 
 const state = {
   viewMode: "focus", // "focus" | "region" | "world"
@@ -14,8 +16,9 @@ const state = {
   arr: null,
   routeResult: null, // {dep,arr,totalFlights,options:[...]}
   selectedOptionIndex: null, // null = 전체 겹쳐보기(기본)
-  focusFirs: [], // 결정 포커스: 선택 OD의 enroute FIR만
+  focusFirs: [], // 결정 포커스: 선택 OD의 enroute FIR + 인천(홈) FIR은 상시(2026-07-23)
   focusAirways: [], // 결정 포커스: 경로 bbox 스코프 항공로
+  focusWaypoints: [], // 결정 포커스: 경로 bbox 스코프 픽스(2026-07-23 추가)
   bulk: null, // 전세계/지역 컨텍스트 온디맨드 캐시: {firs,tca,airways,airports,navaids,waypoints}
   derived: { firByIcao: new Map(), airportByIcao: new Map() },
 };
@@ -43,7 +46,13 @@ function describeError(err) {
 /** 부트 최소 로드(§3.1 2번): OD select 채움 + OD 지점 표시용 저배율 공항. */
 export async function bootMinimal() {
   try {
-    const [odRes, apRes] = await Promise.all([api.odPairs(), api.airports({ type: "A,B" })]);
+    const [odRes, apRes] = await Promise.all([
+      api.odPairs(),
+      api.airports({ type: "A,B" }),
+      // 인천(홈) FIR·픽스는 노선 선택 전에도 상시 표시(사용자 요청, 2026-07-23) — 빈
+      // options로 불러도 loadFocusReference가 homeFirIcao는 항상 포함해 계산한다.
+      loadFocusReference([]),
+    ]);
     state.odPairs = odRes.data.map(adapt.toOdPair);
     state.bootAirports = apRes.data.map(adapt.toAirport);
     for (const a of state.bootAirports) state.derived.airportByIcao.set(a.icao, a);
@@ -86,7 +95,12 @@ function boundingBoxOfOptions(options) {
   let maxLon = -Infinity;
   let any = false;
   for (const o of options) {
-    for (const [lat, lon] of o.trackCoords) {
+    // trackCoords는 인천 인근 국내 구간(incheon_track_fixes)만이라 이것만 쓰면 항로·픽스가
+    // 출발지~경유국까지 안 뻗고 한국 인근에만 좁혀지는 버그가 있었다(사용자 지적, 2026-07-23
+    // 재검증에서 발견 — 노드 하네스로 VTBS→RKSI 재현: FIR은 14개로 확장됐는데 픽스는
+    // 여전히 437개 그대로였음). route.js의 coordsOf와 동일하게 fullRouteCoords를 우선한다.
+    const coords = o.fullRouteCoords.length > 0 ? o.fullRouteCoords : o.trackCoords;
+    for (const [lat, lon] of coords) {
       any = true;
       if (lat < minLat) minLat = lat;
       if (lat > maxLat) maxLat = lat;
@@ -98,21 +112,33 @@ function boundingBoxOfOptions(options) {
 }
 
 async function loadFocusReference(options) {
-  const icaoSet = new Set();
+  const CONFIG = getConfig();
+  // 인천(홈) FIR은 노선의 enrouteFirs에 안 잡히는 예외적 경우에도 상시 표시(사용자 요청,
+  // 2026-07-23) — icaoSet에 항상 넣어 둔다.
+  const icaoSet = new Set([CONFIG.display.homeFirIcao]);
   for (const o of options) for (const icao of o.enrouteFirs) icaoSet.add(icao);
-  if (icaoSet.size > 0) {
-    const firRes = await api.firs({ icao: [...icaoSet].join(",") });
-    state.focusFirs = firRes.data.map(adapt.toFir);
-    for (const f of state.focusFirs) state.derived.firByIcao.set(f.icao, f);
-  } else {
-    state.focusFirs = [];
-  }
-  const bbox = boundingBoxOfOptions(options);
-  if (bbox) {
-    const awRes = await api.airways({ bbox: bbox.join(",") });
+  const firRes = await api.firs({ icao: [...icaoSet].join(",") });
+  state.focusFirs = firRes.data.map(adapt.toFir);
+  for (const f of state.focusFirs) state.derived.firByIcao.set(f.icao, f);
+
+  // 항로·픽스 조회 범위 = 노선 bbox ∪ 인천 FIR 자체 bbox(노선이 없어도 인천 픽스는 항상
+  // 나오도록). 픽스는 main.js의 전세계 컨텍스트 처리와 동일하게 bbox로 서버에서 좁혀
+  // 받는다(전량 800 하드캡 문제, 2026-07-23).
+  const routeBbox = boundingBoxOfOptions(options);
+  const homeFir = state.focusFirs.find((f) => f.icao === CONFIG.display.homeFirIcao);
+  const homeBbox = homeFir ? boundsOfPolygons(homeFir.polygons) : null;
+  const bboxList = [routeBbox, homeBbox].filter(Boolean);
+  if (bboxList.length > 0) {
+    const bbox = unionBounds(bboxList).join(",");
+    const [awRes, wpRes] = await Promise.all([
+      api.airways({ bbox }),
+      api.waypoints({ bbox, limit: CONFIG.display.waypointLimit }),
+    ]);
     state.focusAirways = awRes.data.map(adapt.toAirway);
+    state.focusWaypoints = wpRes.data.map(adapt.toWaypoint);
   } else {
     state.focusAirways = [];
+    state.focusWaypoints = [];
   }
 }
 
@@ -130,6 +156,7 @@ export async function selectOd(dep, arr) {
   state.selectedOptionIndex = null;
   state.focusFirs = [];
   state.focusAirways = [];
+  state.focusWaypoints = [];
   notify({ type: "od:selecting" });
   try {
     const res = await api.routes(dep, arr);

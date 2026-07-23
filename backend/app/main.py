@@ -16,7 +16,7 @@ from app.config import settings
 from app.db.session import get_engine
 from app.envelope import error_envelope
 from app.middleware import RateLimitMiddleware, RequestLoggingMiddleware
-from app.routers import fois, flow_management, reference, routes
+from app.routers import airports, fois, flow_management, reference, routes
 
 logging.basicConfig(level=logging.INFO)
 
@@ -76,6 +76,7 @@ app.include_router(reference.router)
 app.include_router(routes.router)
 app.include_router(fois.router)
 app.include_router(flow_management.router)
+app.include_router(airports.router)
 
 # 프론트(frontend/) 동일 오리진 서빙(완료검증 §D-4, 2026-07-22) — "/api/*"는 위 라우터가
 # 먼저 매치되므로 이 마운트("/")는 그 외 경로(정적 파일·SPA index.html)만 담당한다.

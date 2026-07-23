@@ -44,6 +44,11 @@ export function toWaypoint(r) {
   return { ident: r.ident, lat: r.lat, lon: r.lon, country: r.country, latlng: [r.lat, r.lon] };
 }
 
+/** SID/STAR 절차 1건(원본 문서/08 §SS: proc 1=SID, 2=STAR). coords는 이미 [[lat,lon],...]. */
+export function toSidStar(r) {
+  return { proc: r.proc, name: r.name, airport: r.airport, coords: r.coords };
+}
+
 export function toOdPair(r) {
   return { dep: r.dep, arr: r.arr, totalFlights: r.total_flights };
 }
@@ -97,6 +102,18 @@ export function toFlowManagementItem(r) {
     targetFix: r.target_fix,
     restrictionSummary: r.restriction_summary,
     qualityStatus: r.quality_status,
+  };
+}
+
+/** /api/airports/{icao}/ops 응답의 출발/도착 KPI 요약 1건(F3 어댑터 규약). */
+export function toAirportOpsSummary(s) {
+  return {
+    flights: s.flights,
+    onTimeRate: s.on_time_rate,
+    avgTaxiOutMin: s.avg_taxi_out_min,
+    ctotAdherence: s.ctot_adherence,
+    avgTaxiInMin: s.avg_taxi_in_min,
+    avgFirToAppMin: s.avg_fir_to_app_min,
   };
 }
 

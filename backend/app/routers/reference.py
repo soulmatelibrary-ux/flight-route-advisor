@@ -130,3 +130,16 @@ def get_waypoints(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _set_long_cache(response)
     return envelope(data, source="reference-static")
+
+
+@router.get("/sidstar")
+def get_sidstar(
+    response: Response,
+    airport: str | None = Query(default=None, description="공항 ICAO(한국만 데이터 있음, docs/03 §3 SS)"),
+):
+    try:
+        data = loader.load_sidstar(airport=airport)
+    except _ASSET_ERRORS as exc:
+        raise HTTPException(status_code=503, detail="참조 데이터 자산을 불러올 수 없음") from exc
+    _set_long_cache(response)
+    return envelope(data, source="reference-static")

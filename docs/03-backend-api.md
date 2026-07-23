@@ -47,14 +47,15 @@
 | `GET /api/reference/tca` | 접근관제구역 | TCA + TCALBL | `bbox` |
 | `GET /api/reference/acc-sectors` | ACC 관제섹터 | ACCS `{acc:{IN,DG}, sectors:[...]}` | — |
 | `GET /api/reference/firko` | FIR 한국어명 | FIRKO `{ICAO:한글명}` | — |
-| `GET /api/reference/sidstar` | (2단계) SID/STAR | SS | `airport` |
+| `GET /api/reference/sidstar` | SID/STAR(한국만, SID 14·STAR 103) | SS `[proc,name,airport,coords]` | `airport`(없으면 전체 117건) |
 | `GET /api/reference/suas` | (2단계) 특수사용공역 | SU/SUW | `bbox`,`scope` |
 
 - `bbox=minLat,minLon,maxLat,maxLon`, `zoom=<int>` — 서버가 줌별 표시 규칙(원본 `03`)을 적용해 반환량을 줄인다.
 - 응답 형태는 키 기반 객체 배열(예 airways: `{ident, seq, a:[lat,lon], b:[lat,lon], upper, lower}`) — 프론트 어댑터가 04-A 사전투영 입력으로 변환.
 
 > **구현 범위(2026-07-22)**: MVP DoD([05](./05-mvp-scope.md) §2.4 "참조 지도 6종")에 필요한 firs·tca·airways·airports·navaids·waypoints만 우선 구현했다.
-> - `acc-sectors`·`sidstar`·`suas`는 FIR 분석 패널·2단계 기능 전용이라 이번 라운드 대상이 아니다.
+> - `acc-sectors`·`suas`는 FIR 분석 패널·2단계 기능 전용이라 이번 라운드 대상이 아니다.
+> - **`sidstar`는 2026-07-23 사용자 요청으로 추가 구현**(원래 2단계 예정이었으나 범위 변경): `proc`(1=SID,2=STAR) 그대로 반환, bbox 없이 `airport` 단일 필터만(전체 117건이라 bbox 불필요). 프론트는 경로 선택 시 출발 공항의 SID·도착 공항의 STAR만 걸러 표시([04](./04-frontend-migration.md), `layers/route.js` `renderSidStar`).
 > - `firko`는 **소스 자체가 없다**: `사전빌드_JSON/`에 `firko.json`이 존재하지 않고(원본 HTML에만 내장돼 있을 가능성), 임의로 한글 FIR명을 만들어 넣지 않는다(허위 정보 생성 금지 원칙). 필요해지면 원본 HTML에서 `FIRKO` const 블록만 스크립트로 추출(전체 Read 금지, §6)해 아티팩트로 남길 것.
 > - `zoom`은 파라미터로는 받되(airways/airports/navaids/waypoints), 원본 `문서/03`이 airports "저배율은 민간/공용만" 외에는 구체적 수치 임계값을 규정하지 않아 실제 씨닝 로직은 아직 붙이지 않았다 — 프론트(F5/F9) 연동 시 실사용 줌 레벨을 보고 확정.
 > - **확정(2026-07-22, Stage 2 F5/F9 연동)**: 공항 저배율(민간/공용만) 임계는 `frontend/js/config.js`의 `display.airportFullTypeZoom=5`로 **프론트 클라이언트 측**에서 적용한다(전세계/지역 컨텍스트 모드에서 공항 전량을 한 번 받아 zoom에 따라 표시 그룹만 토글 — 서버 재요청 없음). 서버 쿼리 파라미터 `zoom`은 이번 라운드에서도 씨닝을 적용하지 않은 채로 남겨둔다(요청 파라미터 자체는 받아 검증만 하고 무시) — 항공로/픽스/항행시설의 줌별 반환량 축소(타일화)는 [05-mvp-scope](./05-mvp-scope.md) §3 2단계("참조 지오메트리 타일화")로 이관.
@@ -89,12 +90,29 @@
 ```
 - 집계 산출·좌표해석은 [02](./02-db-integration.md) §4 (배치). 이 API는 사전집계 결과를 서빙.
 
-### 4.2 공항 운항(ACDM KPI) — (2단계)
+### 4.2 공항 운항(ACDM KPI) — 구현됨(2단계, 2026-07-23)
 | 엔드포인트 | 설명 | 출처 | 정렬키 |
 |---|---|---|---|
-| `GET /api/airports/{icao}/ops?date_from=&date_to=` | 출발·도착 정시성/택시/CTOT 준수 KPI 요약 | `processed_acdm_departure`, `processed_acdm_arrival` | `operation_date+airport_icao+flight_icao` |
+| `GET /api/airports/{icao}/ops?date_from=&date_to=` | 출발·도착 정시성/택시/CTOT 준수 KPI 요약 | `processed_acdm_departure`, `processed_acdm_arrival` | 없음(전체 집계, `airport_ops.py`) |
 
-집계에 쓰는 물리 컬럼(확정): 출발 `departure_punctuality_min, taxi_out_additional_min, ctot_slot_adherence, ttot, ctot`; 도착 `arrival_punctuality_min, actual_taxi_in_min, fir_to_app_min, final_approach_min, eldt, aldt`. 필터: `operation_date`, `airport_icao`.
+집계에 쓰는 물리 컬럼(구현 기준 — ACDM 스킬이 이미 계산해 둔 파생 KPI 컬럼만 쓴다.
+원시 마일스톤(`ttot/ctot/eldt/aldt` 등)에서 직접 다시 계산하지 않는다, 스킬을 블랙박스로
+다루는 원칙): 출발 `departure_punctuality_min, taxi_out_additional_min,
+ctot_slot_adherence`; 도착 `arrival_punctuality_min, actual_taxi_in_min,
+fir_to_app_min`. 필터: `airport_icao`(경로 파라미터), `operation_date`(선택).
+
+이 컬럼들은 DB에 **text로 저장**(스킬의 `number_text()`가 NaN을 NULL이 아닌 빈
+문자열로 직렬화)돼 있어, 집계 전 `nullif(col, '')`로 빈 문자열을 NULL로 바꾼 뒤
+`cast(..., Numeric)`한다(`airport_ops.py:_numeric()`). `ctot_slot_adherence`는 숫자가
+아니라 범주 문자열("CTOT없음"/"계산불가"/"조기"/"준수"/"지연") — "조기"+"준수"+"지연"을
+분모, "준수"를 분자로 `ctot_adherence`를 계산한다("CTOT없음"·"계산불가"는 판정 대상이
+아니므로 분모에서 제외).
+
+**`on_time_rate` 임계값 확정(2026-07-23)**: 원본 스킬 계약·전처리 스크립트 어디에도
+"정시" 판정 임계가 없어(부호·단위만 정의) EUROCONTROL/ICAO 산업표준 On-Time
+Performance 정의(스케줄 대비 15분 이내, 조기는 항상 정시)를 채택했다
+(`punctuality_min <= 15`). 도메인 판정값이라 재검토 필요 시 이 값만 바꾸면 된다
+(`airport_ops.py:_ON_TIME_THRESHOLD_MIN`).
 
 응답 예(키 기반, 물리 컬럼은 어댑터로 매핑):
 ```json
@@ -104,6 +122,12 @@
   "arrival":   { "flights": 1201, "on_time_rate": 0.90, "avg_taxi_in_min": 7.8, "avg_fir_to_app_min": 22.1 }
 }
 ```
+
+`run_id`는 ODR2(§4.1)·FOIS(§4.3)와 동일한 이유로 항상 null. `data_period`는 출발·도착
+양쪽을 합친 실제 걸린 날짜의 min/max(둘 다 0건이면 null).
+
+프론트: `frontend/js/ops-panel.js`(FOIS/흐름관리 패널과 동일하게 OD 선택·뷰모드와
+무관한 독립 조회 도구) + `js/api.js:airportOps`.
 
 ### 4.3 지연원인(FOIS) — 구현됨(2단계 착수, 2026-07-22)
 | 엔드포인트 | 설명 | 출처 | 정렬키 |
