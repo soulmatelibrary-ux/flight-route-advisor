@@ -75,4 +75,6 @@ export const api = {
   waypoints: ({ bbox, limit } = {}) => getJson("/reference/waypoints", { bbox, limit }),
   foisDelays: ({ direction, airport, dateFrom, dateTo } = {}) =>
     getJson("/fois/delays", { direction, airport, date_from: dateFrom, date_to: dateTo }),
+  flowManagement: ({ dateFrom, dateTo, fir, airway, limit, offset } = {}) =>
+    getJson("/flow-management", { date_from: dateFrom, date_to: dateTo, fir, airway, limit, offset }),
 };

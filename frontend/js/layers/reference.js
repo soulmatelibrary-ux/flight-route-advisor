@@ -105,13 +105,17 @@ export function createReferenceLayers(map, CONFIG) {
     updateLabelVisibility();
   }
 
+  // 픽스/항행시설/공항 마커 크기·색상: 전세계/지역 컨텍스트에서 개수가 많아(픽스 800·
+  // 항행시설 수천·공항 10,030) 진한 ink 톤 + 원래 크기가 너무 눈에 띈다는 피드백(2026-07-23)
+  // 으로 크기 절반 + inkSoft(옅은 톤)로 낮춤. 결정 포커스는 이 레이어들을 거의 안 쓰므로
+  // (waypoints/tca/navaids는 focus에서 항상 빈 배열, 공항은 출발·도착 2개뿐) 영향 적음.
   function renderWaypoints(rows) {
     clear("waypoints");
     for (const wp of rows) {
       L.circleMarker(wp.latlng, {
         renderer: canvasRenderer,
-        radius: 3,
-        color: CONFIG.tokens.ink,
+        radius: 1.5,
+        color: CONFIG.tokens.inkSoft,
         weight: 1,
         fillColor: CONFIG.tokens.paper,
         fillOpacity: 1,
@@ -126,7 +130,7 @@ export function createReferenceLayers(map, CONFIG) {
     clear("navaids");
     for (const nv of rows) {
       L.marker(nv.latlng, {
-        icon: L.divIcon({ className: "navaid-triangle", iconSize: [10, 10], iconAnchor: [5, 5] }),
+        icon: L.divIcon({ className: "navaid-triangle", iconSize: [5, 5], iconAnchor: [2.5, 2.5] }),
       })
         .bindPopup(escapeHtml(nv.ident))
         .addTo(groups.navaids);
@@ -141,10 +145,10 @@ export function createReferenceLayers(map, CONFIG) {
     for (const ap of rows) {
       const marker = L.circleMarker(ap.latlng, {
         renderer: canvasRenderer,
-        radius: 4,
-        color: CONFIG.tokens.ink,
+        radius: 2,
+        color: CONFIG.tokens.inkSoft,
         weight: 1,
-        fillColor: CONFIG.tokens.ink,
+        fillColor: CONFIG.tokens.inkSoft,
         fillOpacity: 0.8,
       })
         .bindPopup(

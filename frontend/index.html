@@ -69,6 +69,29 @@
       <p id="fois-summary" class="muted"></p>
       <ol id="fois-causes" class="fois-causes"></ol>
       <p id="fois-error" class="error" hidden></p>
+
+      <h2>흐름관리 조치</h2>
+      <form id="flow-form">
+        <div class="field fois-date-range">
+          <label for="flow-date-from">기간 (선택)</label>
+          <input id="flow-date-from" type="date" />
+          <span aria-hidden="true">~</span>
+          <input id="flow-date-to" type="date" />
+        </div>
+        <div class="field">
+          <label for="flow-fir">대상 FIR (선택)</label>
+          <input id="flow-fir" type="text" maxlength="10" placeholder="예: RKRR" />
+        </div>
+        <div class="field">
+          <label for="flow-airway">대상 항공로 (선택)</label>
+          <input id="flow-airway" type="text" maxlength="10" placeholder="예: A591" />
+        </div>
+        <button id="flow-search-btn" type="submit">조회</button>
+      </form>
+      <p id="flow-summary" class="muted"></p>
+      <ol id="flow-items" class="flow-items"></ol>
+      <button id="flow-more-btn" type="button" hidden>더 보기</button>
+      <p id="flow-error" class="error" hidden></p>
     </section>
   </main>
 

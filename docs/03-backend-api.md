@@ -131,12 +131,29 @@
 
 프론트: `frontend/js/fois-panel.js`(F6 ROUTE 패널과 독립된 조회 도구, `panel-right`에 배치) + `js/api.js:foisDelays`. store.js 전역 상태에 얹지 않음(뷰모드·OD 선택과 무관).
 
-### 4.4 흐름관리 (자체 전처리분만) — (2단계)
+### 4.4 흐름관리 (자체 전처리분만) — 구현됨(2단계 착수, 2026-07-23)
 | 엔드포인트 | 설명 | 출처 | 정렬키 |
 |---|---|---|---|
-| `GET /api/flow-management?date_from=&date_to=&fir=&airway=` | 적용 흐름관리 조치 목록 | `processed_flow_management` | `flow_id` |
+| `GET /api/flow-management?date_from=&date_to=&fir=&airway=&limit=&offset=` | 적용 흐름관리 조치 목록(페이지네이션) | `processed_flow_management` | `apply_start_dt`(1차) + `flow_id`(2차, 동률 타이브레이커) |
 
-응답/필터 물리 컬럼: `apply_start_dt, apply_end_dt, apply_minutes, minit, mit, alt_speed_limit, target_airport, target_fir, target_route, target_fix, restriction_summary, quality_status`. 필터: `record_date`/`apply_start_dt`, `target_fir`, `target_route`.
+응답/필터 물리 컬럼: `apply_start_dt, apply_end_dt, apply_minutes, minit, mit, alt_speed_limit, target_airport, target_fir, target_route, target_fix, restriction_summary, quality_status`. 필터: `date_from`/`date_to`(선택, `YYYY-MM-DD` — [02](./02-db-integration.md) §3 최신본 뷰의 날짜 컬럼인 `record_date`에 매칭. 문서 초안이 언급한 `apply_start_dt` 필터는 채택하지 않음 — 최신본 윈도우 계산이 `record_date` 기준이라 필터도 같은 컬럼을 써야 윈도우·필터가 어긋나지 않는다) · `fir`(선택, 영문·숫자 1~10자 — `target_fir` 대소문자 무시 완전일치. 실측상 콤마 목록이 아니라 단일 값이라 부분일치 대신 완전일치 채택) · `airway`(선택, 동일 검증 — `target_route` 완전일치). `limit`(기본 100, 최대 500) · `offset`(기본 0) — [03 §7](#7-비기능-요건-mvp) "대량 목록(흐름관리)에 페이지네이션" 요건 반영.
+
+`run_id`는 §4.1/§4.3과 동일한 이유로 항상 null. `data_period`는 페이지네이션 전 필터링된 전체 집합의 `record_date` min/max(결과 0건이면 null) — `total`도 이 페이지가 아니라 필터 전체 기준.
+
+응답 예:
+```json
+{
+  "data": {
+    "items": [
+      { "flow_id": "FLOW_20260101_0002", "apply_start_dt": "2026-01-01 04:30", "apply_end_dt": "2026-01-01 07:00", "apply_minutes": "150", "minit": null, "mit": null, "alt_speed_limit": null, "target_airport": null, "target_fir": "RKRR", "target_route": null, "target_fix": null, "restriction_summary": "...", "quality_status": "정상" }
+    ],
+    "total": 42, "limit": 100, "offset": 0
+  },
+  "meta": { "source": "processed_flow_management", "run_id": null, "data_period": "20260101-20260131", "warnings": [] }
+}
+```
+
+프론트: `frontend/js/flow-management-panel.js`(FOIS 패널과 동일하게 store.js 전역 상태와 무관한 독립 조회 도구, `panel-right`에 배치, "더 보기" 버튼으로 offset 누적 로드) + `js/api.js:flowManagement` + `js/adapters.js:toFlowManagementItem`.
 
 > **비행편 영향 결합은 제외.** 원본 `03`의 "흐름관리 탭(비행편 영향)"은 통합데이터·영향상세 테이블에 의존하며, 그 테이블은 전처리 1단계에서 제외됨([02](./02-db-integration.md) §2). 3단계로 보류.
 

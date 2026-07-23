@@ -81,6 +81,25 @@ export function toFoisCause(c) {
   };
 }
 
+/** /api/flow-management 응답의 조치 1건 → 내부에서 쓰는 camelCase 형태(F3 어댑터 규약). */
+export function toFlowManagementItem(r) {
+  return {
+    flowId: r.flow_id,
+    applyStartDt: r.apply_start_dt,
+    applyEndDt: r.apply_end_dt,
+    applyMinutes: r.apply_minutes,
+    minit: r.minit,
+    mit: r.mit,
+    altSpeedLimit: r.alt_speed_limit,
+    targetAirport: r.target_airport,
+    targetFir: r.target_fir,
+    targetRoute: r.target_route,
+    targetFix: r.target_fix,
+    restrictionSummary: r.restriction_summary,
+    qualityStatus: r.quality_status,
+  };
+}
+
 export function toOptArray(o) {
   const flatten = (pairs) => pairs.flat();
   return [

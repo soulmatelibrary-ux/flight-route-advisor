@@ -10,6 +10,7 @@ import { createAdsbLayer } from "./layers/adsb.js";
 import { bindAirportWeatherButtons } from "./weather.js";
 import { initRoutePanel } from "./route-panel.js";
 import { initFoisPanel } from "./fois-panel.js";
+import { initFlowManagementPanel } from "./flow-management-panel.js";
 import { initViewModeToggle } from "./viewmode.js";
 import { initMinimap } from "./minimap.js";
 
@@ -89,6 +90,7 @@ async function main() {
   bindAirportWeatherButtons(map);
   initRoutePanel();
   initFoisPanel();
+  initFlowManagementPanel();
   initMinimap(map, CONFIG);
 
   function fitToSelectedRoute() {
@@ -101,6 +103,14 @@ async function main() {
 
   initViewModeToggle(map, CONFIG, { onFocusEnter: fitToSelectedRoute });
 
+  // OD를 고르기 전에는 부트 공항 전체(민간/공용)를 보여줘 사용자가 지도에서 위치를
+  // 훑어볼 수 있게 하지만, OD를 고른 뒤에는 출발·도착 공항 외 나머지는 경로와 무관한
+  // 잡음이라 숨긴다(사용자 피드백, 2026-07-23).
+  function focusAirportsFor(state) {
+    if (!state.dep || !state.arr) return state.bootAirports;
+    return state.bootAirports.filter((a) => a.icao === state.dep || a.icao === state.arr);
+  }
+
   function renderForCurrentState() {
     const state = getState();
     if (state.viewMode === "focus") {
@@ -109,7 +119,7 @@ async function main() {
       referenceLayers.renderTca([]);
       referenceLayers.renderWaypoints([]);
       referenceLayers.renderNavaids([]);
-      referenceLayers.renderAirports(state.bootAirports);
+      referenceLayers.renderAirports(focusAirportsFor(state));
       referenceLayers.showFocus();
     } else if (state.bulk) {
       referenceLayers.renderFirs(state.bulk.firs);
