@@ -40,7 +40,7 @@
 | 엔드포인트 | 반환 | 원본 스키마(08) | 필터 |
 |---|---|---|---|
 | `GET /api/reference/airways` | 항공로 구간 | AW `[ident,seqId,lat1,lon1,lat2,lon2,upper,lower]` | `bbox`, `zoom` |
-| `GET /api/reference/airports` | 공항 | AP `[ICAO,name,lat,lon,elevFt,type]` | `bbox`, `zoom`, `type` |
+| `GET /api/reference/airports` | 공항 | AP `[ICAO,name,lat,lon,elevFt,type]` | `bbox`, `zoom`, `type`, `icao`(콤마목록, 있으면 bbox/type 완전히 무시 — 부트 시 A/B만 받은 목록에 없는 타입의 dep/arr 공항을 focus 모드에서 보강 조회할 때 사용, 2026-07-23) |
 | `GET /api/reference/navaids` | 항행시설 | NV `[ident,name,type,lat,lon,freq]` | `bbox`, `zoom` |
 | `GET /api/reference/firs` | FIR 폴리곤 | FR `[icao,engName,[flat폴리곤...]]` + LBL 라벨점 | `icao`(콤마목록, 결정 포커스 모드에서 경유 FIR만 조회), `bbox` |
 | `GET /api/reference/waypoints` | 항로 픽스 | WP `[ident,lat,lon,ctry]` | `bbox`, `zoom`, `limit`(상한 800) |

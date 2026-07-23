@@ -156,5 +156,8 @@
   4. `cause_major`/`cause_minor`/`cause_process`/`involved_party` 분류 체계가 안정적인 코드값인지, 스킬 산출 시마다 자유 표기가 흔들릴 수 있는지 실측 검증 필요(§Stage 0의 "제외 건수 기록" 사례처럼 원본 데이터 변동성이 실제로 있었던 전례 있음).
 - **착수 신호**: 1단계 실사용 피드백에서 "지금 이상의 노선별 근거가 필요하다"는 신호가 나오면 위 미확정 사항부터 확정한 뒤 별도 체크리스트로 착수.
 
-### 알려진 이슈(미수정, 추적용)
-- [ ] `frontend/js/main.js`의 `focusAirportsFor()`가 boot 시 가져온 민간/공용(A/B) 타입 공항만 필터링 — OD의 출발/도착 공항이 군용/기타(C/D) 타입이면 결정 포커스 모드에서 마커가 조용히 사라짐(에러 없음, 2026-07-23 2차 리뷰에서 발견, flow-management 작업과 무관해 당시 미수정). 완화안: `focusFirs`/`focusAirways`처럼 dep/arr을 ICAO로 온디맨드 조회하도록 변경, 또는 A/B 커버리지가 실제로 보장되는지 데이터로 확인 후 의도적 제약으로 문서화.
+### 알려진 이슈 → 수정 완료 (2026-07-23)
+- [x] `frontend/js/main.js`의 `focusAirportsFor()`가 boot 시 가져온 민간/공용(A/B) 타입 공항만 필터링 — OD의 출발/도착 공항이 군용/기타(C/D) 타입이면 결정 포커스 모드에서 마커가 조용히 사라지던 문제(2026-07-23 2차 리뷰에서 발견, flow-management 작업과 무관해 당시 미수정). 실측으로 실재 확인: RKSO(Osan AB, type C) 등 391개 실제 OD 페어의 dep/arr 44종이 부트 A/B 목록에 없었음.
+  - 수정: `backend/app/reference/loader.py:load_airports()`·`routers/reference.py`에 `icao` 파라미터 추가(`load_firs`와 동일 규약 — 있으면 bbox/type 완전히 무시). `frontend/js/api.js:airports()`가 `icao` 전달, `frontend/js/store.js`에 `ensureAirportsLoaded(icaos)` 추가해 `selectOd()`에서 `loadFocusReference`와 병렬로 dep/arr 누락분만 타입 무관 보강 조회, `derived.airportByIcao`/`bootAirports`에 병합(중복 fetch/push 방지용 `pendingAirportIcaos` 가드 포함).
+  - `senior-code-reviewer` 리뷰 1회 진행, Medium 1건 수정: 라우터의 `type` Query가 `pattern` 검증을 icao 유무와 무관하게 먼저 걸어 "icao 있으면 type 무시" 규약이 `type` 형식 자체엔 안 지켜지던 것 발견 → Query pattern 제거하고 loader 내부(icao 없을 때만 실행되는 분기)에서만 검증하도록 이동, `bbox`와 동일 패턴으로 통일. 문서 동기화([03 §3](./03-backend-api.md) 표에 `icao` 필터 추가) 함께 처리.
+  - uvicorn+curl 종단 확인: A/B 회귀(3,457건 동일)·군용 단건 조회(RKSO type=C 정상 반환)·icao+bbox/무효type 동시 지정 시 icao 우선(200)·icao 없이 무효 type만(400, 회귀 유지). Node로 실제 `store.js`/`api.js`를 백엔드에 붙여 `selectOd("RKSO","RKPK")` 실행 후 `focusAirportsFor` 결과에 RKSO 포함 확인, 재조회·동시 요청 2종 모두 중복 push 없음 확인.
