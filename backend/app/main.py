@@ -15,8 +15,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import settings
 from app.db.session import get_engine
 from app.envelope import error_envelope
-from app.middleware import RateLimitMiddleware, RequestLoggingMiddleware
-from app.routers import airports, fois, flow_management, reference, routes
+from app.middleware import MaxBodySizeMiddleware, RateLimitMiddleware, RequestLoggingMiddleware
+from app.routers import airports, fois, flow_management, reasoning, reference, routes
 
 logging.basicConfig(level=logging.INFO)
 
@@ -34,10 +34,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="flight-route-advisor API", lifespan=lifespan)
 
 app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.rate_limit_per_minute)
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allowed_origins),
+    # GET만 허용 — reasoning.router의 POST /api/reasoning/complete는 현재 501 스텁이라
+    # 크로스오리진 호출 자체가 의미 없다(동일 오리진 서빙 전제, docs/05 §1). 실제로 모드 C를
+    # 활성화하는 시점에는 이 목록에 "POST"를 추가해야 한다(docs/13 STEP C4 활성화 시 확인).
     allow_methods=["GET"],
     allow_headers=["*"],
 )
@@ -77,6 +81,7 @@ app.include_router(routes.router)
 app.include_router(fois.router)
 app.include_router(flow_management.router)
 app.include_router(airports.router)
+app.include_router(reasoning.router)
 
 # 프론트(frontend/) 동일 오리진 서빙(완료검증 §D-4, 2026-07-22) — "/api/*"는 위 라우터가
 # 먼저 매치되므로 이 마운트("/")는 그 외 경로(정적 파일·SPA index.html)만 담당한다.

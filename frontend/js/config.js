@@ -57,6 +57,10 @@ const DEFAULT_CONFIG = {
     // 기준(수 NM)보다 넉넉히 잡아 트랙 표본 잡음으로 인한 오탐(공유 구간을 "다름"으로
     // 잘못 표시)을 줄인다.
     routeDiffThresholdNm: 20,
+    // 선택 경로 위 예상 위치 마커 간격(분, 사용자 요청 2026-07-24 — 30/60/90분 후 위치
+    // 표시). 등속(총소요시간 대비 누적거리 비례) 가정의 단순 버전으로 우선 확정
+    // (layers/route.js renderTimeMarkers 참고, 정확도 개선은 후속 과제로 보류).
+    routeTimeMarkerStepMin: 30,
   },
   tokens: {
     ink: "#22303c",
@@ -78,6 +82,12 @@ const DEFAULT_CONFIG = {
     aircraftGround: "#aeb7bf",
     aircraftOutline: "#4a5560",
     aircraftHalo: "rgba(255,255,255,0.95)",
+    // 인천(ICN/RKSI) 도착·출발 구분(사용자 요청, 2026-07-24) — routeCodes 캐시(layers/adsb.js
+    // icnCategory)로 노선의 출발/도착 공항이 인천인지 판정될 때만 적용. 그 외(영공통과·
+    // 노선 미확인)는 기존 aircraftYellow 그대로(2026-07-23 SIGMET 색상충돌 교훈과 동일 이유로
+    // 기존 토큰 재사용 없이 신설).
+    aircraftIcnDep: "#0c8599",
+    aircraftIcnArr: "#d6336c",
     // 상층풍 연직시어(A3) 전용 — orange/hazardRed와 별개 토큰(2026-07-23 SIGMET 색상충돌
     // 교훈과 동일한 이유: 경로선 위에 그려지는 시어 색이 다른 레이어와 의미가 섞이면 안 됨)
     shearWeak: "#2e7d32",
@@ -97,6 +107,17 @@ const DEFAULT_CONFIG = {
     // SUAS/MOA(특수공역) 전용 — 기존 토큰(orange/hazardRed/cpaPurple 등)과 색상 충돌
     // 방지(2026-07-23 SIGMET 교훈과 동일 이유로 별도 신설, 2026-07-24).
     suas: "#5f3dc4",
+    // 오버레이(경로 상세정보 드로어·AI 근거 다이얼로그·지도 팝업/툴팁) 전용 다크 테마
+    // (사용자 요청 "디자인이 올드함 → 세련되게", 2026-07-24). 지도 배경(paper)·데이터
+    // 의미색(hazardRed 등)은 그대로 두고, 이 오버레이 표면만 분리된 톤을 쓴다.
+    overlayBg: "#151b23",
+    overlayBg2: "#1c242e",
+    overlayText: "#eef2f6",
+    overlayTextSoft: "#8b98a8",
+    // 다크 오버레이 위 경고 텍스트 전용 — hazardRed(#c92a2a)는 밝은 배경 기준 톤이라
+    // 어두운 배경에서 명도 대비가 부족함(사용자 요청 다크 테마 가독성). 지도 위 SIGMET
+    // 폴리곤 등 hazardRed 자체의 의미는 유지, 이건 텍스트 전용 변형.
+    overlayDanger: "#ff6b6b",
   },
   adsb: {
     pollMs: 12000,
@@ -198,6 +219,17 @@ const DEFAULT_CONFIG = {
     trafficThresholds: [7, 12], // [보통 임계, 혼잡 임계] — n>=12 혼잡, n>=7 보통, 그 미만 원활
     trendDelta: 2, // 예측(10분후) 대수가 현재보다 이 값 넘게 크면 ▲, 작으면 ▼
     forecastMinutes: [10, 40], // 완성본 fut20(변수명 유지, 실제 10분)/fut40과 동일한 외삽 시각
+  },
+  // AI 근거화 D1 수동복붙 응답 검증 상한(C3, docs/13-ai-reasoning-dev-plan.md STEP C3 "보안 핵심"
+  // — 신뢰 못 할 입력이므로 필드·타입·길이 상한을 둔다). `reasoning-response.js`가 이 값만 참조.
+  reasoning: {
+    responseMaxRawLen: 20000, // JSON.parse 전 원문 길이 상한(과도하게 큰 붙여넣기로 인한 파싱 비용 방지)
+    whyMaxLen: 2000,
+    maxBottlenecks: 20, // reasoning-context.js의 masked 필드 개수 상한(10/20)과 같은 자릿수 감각으로 설정
+    segMaxLen: 200,
+    reasonMaxLen: 500,
+    maxCaveats: 10,
+    caveatMaxLen: 300,
   },
 };
 

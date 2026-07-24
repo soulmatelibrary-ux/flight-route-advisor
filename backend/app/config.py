@@ -74,6 +74,19 @@ def _parse_positive_int(name: str, raw: str) -> int:
     return value
 
 
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def _parse_bool(name: str, raw: str) -> bool:
+    normalized = raw.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ConfigError(f"{name}은 true/false(1/0, yes/no, on/off)여야 함: {raw!r}")
+
+
 def _parse_cors_origins(raw: str) -> tuple[str, ...]:
     origins = tuple(o.strip() for o in raw.split(",") if o.strip())
     if not origins:
@@ -119,6 +132,16 @@ class Settings:
     rate_limit_per_minute: int
     reference_cache_ttl_seconds: int
     frontend_dir: Path | None
+    # 요청 본문 크기 상한(C4 리뷰 지적, 2026-07-24 — `POST /api/reasoning/complete`가 이 저장소
+    # 첫 본문 있는 엔드포인트라 새로 생긴 표면, `middleware.py::MaxBodySizeMiddleware` 참고).
+    # 다른 라우터는 전부 GET+짧은 쿼리파라미터라 해당 없음.
+    max_request_body_bytes: int
+    # AI 근거화 모드 C(백엔드 프록시) 스켈레톤(docs/13-ai-reasoning-dev-plan.md STEP C4, D9) —
+    # 기본 비활성. 실제 LLM 호출 로직은 제공자/모델 미확정(doc14 §8.1 C-7)이라 아직 없다.
+    reasoning_proxy_enabled: bool
+    reasoning_proxy_provider_url: str | None
+    reasoning_proxy_api_key: str | None
+    reasoning_proxy_timeout_s: int
 
     def __repr__(self) -> str:  # 자격증명 노출 방지(docs/06 §8)
         masked = _mask_database_url(self.database_url)
@@ -127,6 +150,7 @@ class Settings:
             if self.advisor_artifact_database_url
             else None
         )
+        masked_reasoning_key = "***set***" if self.reasoning_proxy_api_key else None
         return (
             f"Settings(database_url={masked!r}, advisor_artifact_database_url={masked_artifact!r}, "
             f"db_ssl_mode={self.db_ssl_mode!r}, "
@@ -136,7 +160,12 @@ class Settings:
             f"cors_allowed_origins={self.cors_allowed_origins}, "
             f"rate_limit_per_minute={self.rate_limit_per_minute}, "
             f"reference_cache_ttl_seconds={self.reference_cache_ttl_seconds}, "
-            f"frontend_dir={self.frontend_dir})"
+            f"frontend_dir={self.frontend_dir}, "
+            f"max_request_body_bytes={self.max_request_body_bytes}, "
+            f"reasoning_proxy_enabled={self.reasoning_proxy_enabled}, "
+            f"reasoning_proxy_provider_url={self.reasoning_proxy_provider_url!r}, "
+            f"reasoning_proxy_api_key={masked_reasoning_key!r}, "
+            f"reasoning_proxy_timeout_s={self.reasoning_proxy_timeout_s})"
         )
 
 
@@ -183,6 +212,18 @@ def load_settings() -> Settings:
             _optional_env("REFERENCE_CACHE_TTL_SECONDS", "86400"),
         ),
         frontend_dir=_resolve_frontend_dir(),
+        max_request_body_bytes=_parse_positive_int(
+            "MAX_REQUEST_BODY_BYTES", _optional_env("MAX_REQUEST_BODY_BYTES", "200000")
+        ),
+        reasoning_proxy_enabled=_parse_bool(
+            "REASONING_PROXY_ENABLED", _optional_env("REASONING_PROXY_ENABLED", "false")
+        ),
+        # URL·키는 필수 아님(스켈레톤 단계, 제공자 미확정) — 값이 있어도 라우터가 아직 쓰지 않는다.
+        reasoning_proxy_provider_url=os.environ.get("REASONING_PROXY_PROVIDER_URL") or None,
+        reasoning_proxy_api_key=os.environ.get("REASONING_PROXY_API_KEY") or None,
+        reasoning_proxy_timeout_s=_parse_positive_int(
+            "REASONING_PROXY_TIMEOUT_S", _optional_env("REASONING_PROXY_TIMEOUT_S", "20")
+        ),
     )
 
 

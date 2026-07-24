@@ -15,12 +15,15 @@ import { createRadarLayer } from "./layers/radar.js";
 import { createGroupedLayerControl } from "./layer-control.js";
 import { bindAirportWeatherButtons, getSigmets, getPireps } from "./weather.js";
 import { initRoutePanel } from "./route-panel.js";
+import { createRouteDetailDrawer } from "./route-detail-drawer.js";
 import { initFoisPanel } from "./fois-panel.js";
 import { initFlowManagementPanel } from "./flow-management-panel.js";
 import { initRouteFoisSummary } from "./route-fois-summary.js";
 import { initRouteOpsSummary } from "./route-ops-summary.js";
 import { initRouteFlowSummary } from "./route-flow-summary.js";
 import { initOpsPanel } from "./ops-panel.js";
+import { initQueryDialogs } from "./query-dialogs.js";
+import { initReasoningPanel } from "./reasoning-panel.js";
 import { initViewModeToggle } from "./viewmode.js";
 import { initMinimap } from "./minimap.js";
 import { boundsOfPolygons, pointInBounds, unionBounds } from "./geo.js";
@@ -128,16 +131,15 @@ async function main() {
     const state = getState();
     bottlenecksPanel.refreshSectorSignal(state.dep, state.arr);
   });
-  // 실시간 항공기는 기본 꺼짐(참고 완성본 원본 주석 "실시간 항공기 — 기본 꺼짐"과 동일,
-  // 사용자 요청 2026-07-23) — adsb.start()는 폴링을 그대로 돌려 STCA/CPA 계산에 쓰지만
-  // 마커 표시 자체는 레이어 컨트롤에서 켤 때만.
+  // 실시간 항공기는 기본 켜짐(사용자 확정 — 레이어 기본 체크 상태 스크린샷, 2026-07-24.
+  // 이전엔 참고 완성본을 따라 기본 꺼짐이었음). 레이어 컨트롤 생성 전에 addTo해야
+  // layer-control.js의 map.hasLayer 초기 체크 상태와 일치한다.
   const hazards = createHazardLayers(CONFIG);
   const radar = createRadarLayer(map, CONFIG);
-  // 기상 레이더는 기본 켜짐(사용자 요청 2026-07-23) — SIGMET/PIREP과 달리 온디맨드 로드를
-  // 트리거하는 overlayadd를 수동으로 한 번 발생시켜야 최초 프레임이 즉시 뜬다(체크박스를
-  // 사용자가 직접 클릭한 것과 동일한 경로).
-  radar.group.addTo(map);
-  map.fire("overlayadd", { layer: radar.group, name: "기상 레이더(강수)" });
+  adsb.group.addTo(map);
+  // 기상 레이더는 기본 꺼짐(사용자 확정 — 레이어 기본 체크 상태 스크린샷, 2026-07-24.
+  // 2026-07-23의 "기본 켜짐" 요청을 대체). 체크박스를 켜면 layer-control.js가 발생시키는
+  // overlayadd로 radar.js의 온디맨드 프레임 로드가 그대로 동작한다.
 
   // 위험기상(SIGMET/PIREP)은 기본 OFF·조건부 토글(docs/10 §2.5 ④) — 레이어 컨트롤에서
   // 켤 때만 조회한다(radar.js의 온디맨드 로드와 동일 원칙). SIGMET은 전세계 목록이라
@@ -251,6 +253,7 @@ async function main() {
   ]);
 
   bindAirportWeatherButtons(map);
+  const routeDetailDrawer = createRouteDetailDrawer();
   initRoutePanel();
   initFoisPanel();
   initFlowManagementPanel();
@@ -258,6 +261,11 @@ async function main() {
   initRouteOpsSummary();
   initRouteFlowSummary();
   initOpsPanel();
+  initQueryDialogs();
+  // AI 근거화(C2, docs/13-ai-reasoning-dev-plan.md) — windLayer/sectorPanel/bottlenecksPanel은
+  // 이미 위에서 생성돼 있고(A3/A4/A5), 이 패널은 그 getter만 읽어 reasoningContext를 조립한다
+  // (중복 계산·중복 API 호출 없음, bottlenecksPanel.getSignals() 참고).
+  initReasoningPanel(CONFIG, { windLayer, sectorPanel, bottlenecksPanel });
   initMinimap(map, CONFIG);
 
   function fitToSelectedRoute() {
@@ -432,6 +440,7 @@ async function main() {
         const opt = state.routeResult.options[state.selectedOptionIndex];
         const coords = opt.fullRouteCoords.length > 0 ? opt.fullRouteCoords : opt.trackCoords;
         adsb.setRouteCoords(coords);
+        routeDetailDrawer.open(state.selectedOptionIndex);
         refreshSidStar(state.dep, state.arr);
         // 상층풍·연직시어·추천고도(A3, docs/13) — 선택된 경로 하나에 대해서만 의미가
         // 있어 "전체 겹쳐보기"(옵션 여럿, selectedOptionIndex===null)에서는 숨긴다.
@@ -442,6 +451,13 @@ async function main() {
         // 그리는 문제 방지) + windLayer/sectorPanel이 예외를 던지면 조용히 건너뜀(각
         // 모듈이 자기 실패는 이미 자체 UI로 표시하므로 여기서 추가로 알릴 필요 없음).
         const myBottlenecksSeq = ++bottlenecksSeq;
+        // bottlenecksPanel의 flow/SUAS 캐시를 windLayer/sectorPanel과 같은 시점에 동기적으로
+        // 무효화한다(리뷰 지적, 2026-07-24) — 전에는 이 캐시가 bottlenecksPanel.update() 내부
+        // (그마저 아래 Promise.all이 끝난 뒤에만 호출됨)에서만 비워져, 노선 선택 직후~그 시점
+        // 사이에 C2(reasoning-panel.js)의 getSignals()가 이전 노선의 flow(found:true인 실제
+        // 값)·SUAS 병목을 그대로 반환할 수 있었다. invalidate()는 캐시만 비우고 조회/렌더는
+        // 안 하므로(update()가 그 몫을 그대로 수행) 아래 흐름은 무변경.
+        bottlenecksPanel.invalidate(state.dep, state.arr);
         Promise.all([windLayer.update(coords, opt.cruiseParity), sectorPanel.update(coords)])
           .then(() => {
             if (myBottlenecksSeq !== bottlenecksSeq) return;
@@ -450,6 +466,7 @@ async function main() {
           .catch(() => {});
       } else {
         adsb.setRouteCoords(null);
+        routeDetailDrawer.close();
         // 선택 해제 시에도 세대 토큰을 증가시켜야 한다 — 안 그러면 이미 늦게 도착한
         // 이전 선택의 SID/STAR 응답이 seq 검사를 그대로 통과해 방금 지워진 레이어를
         // 다시 채워 넣는다(리뷰 지적사항, 2026-07-23).

@@ -206,6 +206,41 @@ function line(text) {
   return div;
 }
 
+// 렌더링 전용 상수(사용자 피드백, 2026-07-24 — "글이 너무 많아서 읽기 싫은 정도"): kind별로
+// 묶어 섹션 헤더를 붙이고, 특수공역(airspace)은 노선에 따라 10개 이상 나올 수 있어 기본
+// 개수까지만 펼치고 "더보기"로 전체를 보게 한다. routeBottlenecks() 자체(순수함수, getSignals()도
+// 공유)는 그대로 두고 렌더링 단계에서만 그룹화·정렬·축약한다 — 신호 자체를 줄이거나 지어내지
+// 않는다(허위 정보 생성 금지 원칙, 이 파일 상단 주석과 동일 정신).
+//
+// reasoning-panel.js가 getSignals()의 bottlenecks를 AI 응답 파싱 결과와 함께 별도의
+// `.bottleneck-list`(단순 목록)로 독립 렌더링하는데(리뷰 지적, 2026-07-24), 이 파일의
+// 카드형 디자인과 의도적으로 통일하지 않았다 — 그쪽은 AI 근거화(docs 11~14, 다른 세션 소관)
+// 응답을 보여주는 별개 화면이라 이 드로어 재정리 범위 밖으로 남겨둔다.
+const KIND_LABELS = {
+  flow_impact: "흐름관리",
+  wind_shear: "상층풍·연직시어",
+  sector_traffic: "섹터 교통",
+  airspace: "특수공역·절차",
+};
+const KIND_ORDER = ["flow_impact", "wind_shear", "sector_traffic", "airspace"];
+const AIRSPACE_COLLAPSE_COUNT = 5;
+
+function severityIcon(severity) {
+  return severity === "warn" ? "⚠" : "ℹ";
+}
+
+function buildRow(item) {
+  const row = document.createElement("div");
+  row.className = `bottleneck-row bottleneck-${item.severity}`;
+  const icon = document.createElement("span");
+  icon.className = "bn-icon";
+  icon.textContent = severityIcon(item.severity);
+  const text = document.createElement("span");
+  text.textContent = item.label;
+  row.append(icon, text);
+  return row;
+}
+
 /**
  * DOM 패널(#route-bottlenecks) 관리 + A1 흐름관리 영향률 자체 조회(route-flow-summary.js와
  * 동일하게 독립 조회 — 이 코드베이스 위젯 공통 관례). A3/A4는 자체 조회하지 않고 이미 계산을
@@ -224,6 +259,9 @@ export function createBottlenecksPanel(CONFIG, windLayer, sectorPanel) {
   let lastSuasItems = [];
   let lastDep = null;
   let lastArr = null;
+  // "더보기" 펼침 상태(사용자 피드백, 2026-07-24) — 노선을 새로 고를 때마다(update()/clear())
+  // 리셋해 이전 노선에서 펼쳐뒀던 상태가 다음 노선에 그대로 남지 않게 한다.
+  let airspaceExpanded = false;
 
   function clearPanel() {
     if (panelEl) {
@@ -243,18 +281,82 @@ export function createBottlenecksPanel(CONFIG, windLayer, sectorPanel) {
     panelEl.append(line("경로 병목 신호 (1단계 — 흐름관리·상층풍·섹터교통·특수공역, 부분 힌트)"));
     // 흐름관리 조회 실패는 "신호 없음"과 구분해 명시한다(route-flow-summary.js와 동일 원칙) —
     // 안 그러면 "이 노선은 흐름관리 영향이 없다"와 "서버 응답을 못 받았다"를 사용자가 구분 못 함.
+    // buildRow()를 그대로 써서 다른 warn 줄과 동일하게 아이콘이 붙게 한다(리뷰 지적, 2026-07-24).
     if (flowError) {
-      const row = document.createElement("div");
-      row.className = "bottleneck-row bottleneck-warn";
-      row.textContent = `흐름관리 영향률 조회 실패 — ${flowError}`;
-      panelEl.append(row);
+      panelEl.append(buildRow({ label: `흐름관리 영향률 조회 실패 — ${flowError}`, severity: "warn" }));
     }
-    for (const item of items) {
-      const row = document.createElement("div");
-      row.className = `bottleneck-row bottleneck-${item.severity}`;
-      row.textContent = item.label;
-      panelEl.append(row);
+
+    // 요약 배지(사용자 요청 "눈에 확 들어오게", 2026-07-24) — 전체를 읽지 않아도 경고/참고
+    // 건수를 한눈에 파악. 개수만 세는 것이라 새 판정을 만들지 않는다(기존 severity 그대로 집계).
+    if (items.length > 0) {
+      const warnCount = items.filter((i) => i.severity === "warn").length;
+      const infoCount = items.length - warnCount;
+      const summary = document.createElement("div");
+      summary.className = "bottleneck-summary";
+      if (warnCount > 0) {
+        const badge = document.createElement("span");
+        badge.className = "bottleneck-summary-warn";
+        badge.textContent = `⚠ 경고 ${warnCount}`;
+        summary.append(badge);
+      }
+      if (infoCount > 0) {
+        const badge = document.createElement("span");
+        badge.className = "bottleneck-summary-info";
+        badge.textContent = `참고 ${infoCount}`;
+        summary.append(badge);
+      }
+      panelEl.append(summary);
     }
+
+    // kind별 섹션으로 묶어 "이게 왜/어떤 종류의 신호인지" 스캔하기 쉽게 한다. 각 섹션 안에서는
+    // 경고를 먼저 보여 가장 중요한 정보가 위로 오게 정렬(원래 순서는 유지, stable하게 severity만
+    // 기준으로 재배열).
+    function sortWarnFirst(list) {
+      return list
+        .map((item, idx) => ({ item, idx }))
+        .sort((a, b) => {
+          if (a.item.severity === b.item.severity) return a.idx - b.idx;
+          return a.item.severity === "warn" ? -1 : 1;
+        })
+        .map(({ item }) => item);
+    }
+
+    function renderGroup(label, groupItems, collapsible) {
+      if (groupItems.length === 0) return;
+      const group = document.createElement("div");
+      group.className = "bottleneck-group";
+      const header = document.createElement("div");
+      header.className = "bottleneck-group-header";
+      header.textContent = `${label} (${groupItems.length})`;
+      group.append(header);
+
+      const shouldCollapse = collapsible && groupItems.length > AIRSPACE_COLLAPSE_COUNT && !airspaceExpanded;
+      const visibleItems = shouldCollapse ? groupItems.slice(0, AIRSPACE_COLLAPSE_COUNT) : groupItems;
+      for (const item of visibleItems) group.append(buildRow(item));
+
+      if (shouldCollapse) {
+        const moreBtn = document.createElement("button");
+        moreBtn.type = "button";
+        moreBtn.className = "bottleneck-more-btn";
+        moreBtn.textContent = `더보기 (${groupItems.length - AIRSPACE_COLLAPSE_COUNT}개 더)`;
+        moreBtn.addEventListener("click", () => {
+          airspaceExpanded = true;
+          renderFromCache();
+        });
+        group.append(moreBtn);
+      }
+      panelEl.append(group);
+    }
+
+    for (const kind of KIND_ORDER) {
+      renderGroup(KIND_LABELS[kind], sortWarnFirst(items.filter((i) => i.kind === kind)), kind === "airspace");
+    }
+    // KIND_ORDER/KIND_LABELS에 없는 kind는 조용히 사라지지 않고 "기타"로 모아 보여준다(리뷰
+    // 지적, 2026-07-24) — routeBottlenecks()가 향후 새 신호 종류를 추가했는데 이 목록을
+    // 갱신하지 않으면, getSignals()(AI 근거화용)에는 그대로 남아있는데 이 화면에서만 이유 없이
+    // 안 보이는 사용자-AI 불일치가 생길 수 있었다.
+    const otherItems = sortWarnFirst(items.filter((i) => !KIND_ORDER.includes(i.kind)));
+    renderGroup("기타", otherItems, false);
   }
 
   function renderFromCache() {
@@ -283,17 +385,31 @@ export function createBottlenecksPanel(CONFIG, windLayer, sectorPanel) {
     }
   }
 
-  async function update(dep, arr, coords) {
-    const mySeq = ++seq;
+  /** 캐시만 동기적으로 초기화(렌더·조회는 하지 않음) — C2(reasoning-panel.js)의 getSignals()가
+   * 노선 선택 직후~update() 완료 전 사이에 이전 노선의 flow/SUAS를 반환하던 문제(리뷰 지적,
+   * 2026-07-24: wind.js/analyze-sectors.js는 이미 이 방식으로 고쳤는데 여기 lastFlowImpact/
+   * lastSuasItems는 update() 내부(그것도 windLayer/sectorPanel의 Promise.all이 끝난 뒤에야
+   * 호출되는 update()) 안에서만 비워지고 있어 창이 더 컸다). main.js가 windLayer.update()/
+   * sectorPanel.update()를 시작하는 바로 그 지점에서 동기적으로 호출해야 한다 — update() 자체도
+   * 독립적으로 호출됐을 때 안전하도록 그대로 다시 부른다(멱등, 중복 호출 무해). */
+  function invalidate(dep, arr) {
     lastDep = dep;
     lastArr = arr;
     lastFlowImpact = null;
     lastFlowError = null;
+    lastSuasItems = [];
+  }
+
+  async function update(dep, arr, coords) {
+    const mySeq = ++seq;
+    airspaceExpanded = false; // 새 노선 선택 — 이전 노선에서 펼쳐둔 상태를 이어받지 않음
     // lastSuasItems도 다른 캐시와 동일하게 await 전에 동기적으로 비운다(리뷰 지적,
     // 2026-07-24) — 안 비우면 이 await가 끝나기 전 도착하는 ADS-B 스냅샷(refreshSectorSignal)이
     // lastDep/lastArr는 이미 새 노선을 가리키는데 lastSuasItems만 이전 노선 것을 그대로 써서,
-    // 병목 패널에 엉뚱한 노선의 SUAS 경고가 잠깐 섞여 나올 수 있었다.
-    lastSuasItems = [];
+    // 병목 패널에 엉뚱한 노선의 SUAS 경고가 잠깐 섞여 나올 수 있었다. invalidate()가 main.js에서
+    // 이미 먼저 호출됐더라도 여기서 다시 호출하는 것은 멱등(무해) — invalidate() 자체를
+    // 호출하지 않고 update()만 단독 호출하는 경로(예: 기존 테스트)도 여전히 안전해야 하므로.
+    invalidate(dep, arr);
     const [flowOutcome, suasList] = await Promise.all([
       api.routeFlow(dep, arr).then(
         (res) => ({ ok: true, data: res.data }),
@@ -324,8 +440,29 @@ export function createBottlenecksPanel(CONFIG, windLayer, sectorPanel) {
     lastFlowImpact = null;
     lastFlowError = null;
     lastSuasItems = [];
+    airspaceExpanded = false;
     clearPanel();
   }
 
-  return { update, clear, refreshSectorSignal };
+  /** C2(reasoning-panel.js)가 reasoningContext(§7)를 조립할 때 쓰는 getter — windLayer.
+   * getRecommendation()/sectorPanel.getDemand()와 동일한 "이미 계산된 값을 읽기만" 원칙.
+   * `flow`는 §7 스키마의 `flow` 필드 그대로(found/impact_pct/main_causes/main_limits/
+   * hour_impact_pct 등 원본 API 응답 shape), `bottlenecks`는 renderFromCache()가 화면에
+   * 그리는 것과 동일한 배열(중복 계산 없음 — routeBottlenecks()는 순수함수라 다시 불러도
+   * 부수효과 없음). 선택된 노선이 없으면(update() 이후 clear() 호출) flow=null·
+   * bottlenecks=[]가 반환된다(결측 규약과 동일하게 정직한 빈 값). */
+  function getSignals() {
+    return {
+      flow: lastFlowImpact,
+      bottlenecks: routeBottlenecks({
+        flowImpact: lastFlowImpact,
+        windRec: windLayer.getRecommendation(),
+        sectorDemand: sectorPanel.getDemand(),
+        windConfig,
+        suasItems: lastSuasItems,
+      }),
+    };
+  }
+
+  return { update, clear, refreshSectorSignal, getSignals, invalidate };
 }

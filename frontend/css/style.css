@@ -48,13 +48,99 @@ html, body {
   white-space: nowrap;
 }
 
+/* FOIS/흐름관리/ACDM 조회 진입점(사용자 요청, 2026-07-24) — 예전엔 우측 패널에 폼 3개가
+   항상 펼쳐져 있어 280px 폭에 텍스트·날짜입력이 줄바꿈으로 뭉개졌다(스크린샷 피드백).
+   상단바 아이콘 버튼 + 중앙 팝업(dialog)으로 옮겨 우측 패널은 "의사결정 근거"(자동 요약)만
+   남기고, 폭 제약 없는 팝업에서 조회하도록 분리(기존 #reasoning-dialog와 동일한 패턴). */
+.query-tools { display: flex; gap: 6px; }
+.icon-btn {
+  display: flex; align-items: center; gap: 5px;
+  border: 1px solid var(--ink-soft); border-radius: 6px;
+  background: transparent; color: var(--ink); cursor: pointer;
+  padding: 5px 9px; font-size: 11px; font-family: inherit; white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.icon-btn:hover { background: rgba(34,48,60,0.06); border-color: var(--ink); }
+.icon-btn svg { width: 15px; height: 15px; flex: none; }
+
 #layout {
   display: grid;
   grid-template-columns: 280px 1fr 280px;
   height: calc(100% - 57px);
+  transition: grid-template-columns 0.2s ease;
 }
+/* 경로 상세정보 드로어(사용자 요청, 2026-07-24) — 열리면 지도 폭을 줄이고 실제 컬럼을
+   차지한다(오버레이로 지도를 덮지 않음). 드로어 자신은 [hidden]으로 렌더 자체를 끄고,
+   이 클래스가 트랙 너비만 확보한다 — 닫힌 상태에서 0으로 접어 레이아웃 흔들림 없음. */
+/* 드로어 폭 380px→460px(약 1.2배, 사용자 요청 2026-07-24) — 다크 테마 적용 후 상층풍/
+   섹터교통/병목 카드 내용이 여유 있게 보이도록 확장. */
+#layout.drawer-open { grid-template-columns: 280px 460px 1fr 280px; }
 
 .panel { overflow-y: auto; padding: 12px; border-right: 1px solid rgba(34,48,60,0.08); }
+
+/* 경로 상세정보 드로어 본체 — 왼쪽 ROUTE 패널(280px)이 좁아 상층풍·섹터교통·병목신호가
+   줄바꿈으로 뭉개지던 문제(사용자 피드백, 2026-07-24)를 넓은 전용 영역으로 분리해 해결.
+   내용(.route-wind 등)은 기존 클래스를 그대로 재사용하되 이 안에서만 폰트를 키워
+   가독성을 높인다(아래 .drawer .route-wind 오버라이드). 배경은 세련된 다크 톤으로
+   분리해 지도·양옆 밝은 패널과 명확히 구분되는 "결정 패널" 느낌을 준다(사용자 요청
+   "디자인이 올드함 → 세련되게", 2026-07-24, config.js CONFIG.tokens.overlayBg*). */
+.drawer {
+  /* 그리드 아이템 기본값(stretch)이면 내용이 짧아도 행 전체 높이만큼 늘어나 하단에 빈
+     다크 공간이 남는다(사용자 지적, 2026-07-24) — align-self:start로 내용 높이만큼만
+     차지하고, max-height로 내용이 길 때만 원래대로 스크롤되게 캡을 씌운다. */
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  background: var(--overlay-bg);
+  color: var(--overlay-text);
+  box-shadow: 2px 0 16px rgba(0,0,0,0.25);
+  display: flex;
+  flex-direction: column;
+}
+/* CSS 캐스케이드는 명시도보다 origin을 먼저 비교하므로, author 스타일시트의 일반(non-
+   !important) `display` 선언은 항상 UA 스타일시트의 `[hidden]{display:none}`을 이긴다 —
+   즉 위 `.drawer{display:flex}`가 `hidden` 속성을 무력화해 드로어가 항상 렌더링되는
+   버그가 있었다(리뷰 지적·실브라우저 재현 확인, 2026-07-24). `[hidden]`과 결합한 선택자로
+   명시도를 올려 다시 우선하게 한다. */
+.drawer[hidden] { display: none; }
+.drawer-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--overlay-bg);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  z-index: 1;
+}
+.drawer-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--overlay-text-soft); margin: 0; }
+.drawer-header button {
+  border: none; background: none; cursor: pointer; font-size: 20px; line-height: 1;
+  color: var(--overlay-text-soft); padding: 2px 6px; border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.drawer-header button:hover { color: var(--overlay-text); background: rgba(255,255,255,0.08); }
+.drawer-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
+/* 드로어 안에서는 좁은 왼쪽 패널용 11px 대신 더 크게, 3개 패널을 카드로 구분(사용자 요청
+   "글자가 잘보이게 구분하여 정보를 보여주면 좋을") — 가독성 개선이 이 기능의 목적이므로. */
+.drawer-body .route-wind {
+  font-size: 13px; gap: 6px; margin-top: 0; padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.07); border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+  /* 어두운 드로어 배경 위에서 카드가 한 톤 도드라지도록 overlayBg2(사용자 요청 "구분하여
+     보여주면 좋을"과 동일 취지) — .route-wind-warn 배경(붉은 tint)은 아래에서 덮어써 유지. */
+  background: var(--overlay-bg2);
+}
+.drawer-body .route-wind:hover { border-color: rgba(255,255,255,0.16); }
+.drawer-body .route-wind.route-wind-warn {
+  /* overlayDanger(#ff6b6b = 255,107,107)와 같은 붉은 계열로 통일 — hazardRed(다른 톤)와
+     섞이면 배경·테두리가 서로 다른 빨강으로 보이는 문제(리뷰 지적, 2026-07-24) 방지. */
+  background: rgba(255,107,107,0.16);
+  border-left: 3px solid var(--overlay-danger);
+}
 #panel-right { border-right: none; border-left: 1px solid rgba(34,48,60,0.08); }
 .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin: 0 0 8px; }
 
@@ -106,13 +192,15 @@ html, body {
 /* 완성본 #rp-wind.hw 이식 — 현재 표시 중인 고도가 정풍이거나 시어가 강함 임계 초과일 때 경고 배경 */
 .route-wind.route-wind-warn { background: rgba(201,57,43,0.08); }
 .route-wind .wind-good { color: var(--green); font-weight: 600; }
-.route-wind .wind-bad { color: #c0392b; font-weight: 600; }
+.route-wind .wind-bad { color: var(--overlay-danger); font-weight: 600; }
 .wind-fl-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
 .wlvl-btn {
-  border: 1px solid rgba(34,48,60,0.2); border-radius: 4px; padding: 2px 6px; font-size: 10.5px;
-  background: #fff; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; padding: 2px 6px; font-size: 10.5px;
+  background: rgba(255,255,255,0.05); color: var(--overlay-text); cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
-.wlvl-btn.on { border-color: var(--orange); font-weight: 700; }
+.wlvl-btn:hover { background: rgba(255,255,255,0.1); }
+.wlvl-btn.on { border-color: var(--orange); background: rgba(232,89,12,0.18); font-weight: 700; }
 .wlvl-btn.rec::after { content: " ★"; }
 .wind-grade { display: inline-block; padding: 1px 6px; border-radius: 4px; color: #fff; font-weight: 600; }
 
@@ -121,11 +209,110 @@ html, body {
 .sector-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sector-grade { display: inline-block; padding: 1px 6px; border-radius: 4px; color: #fff; font-weight: 600; white-space: nowrap; }
 
-/* 세그먼트 병목 신호 종합(A5, docs/13-ai-reasoning-dev-plan.md) — #route-bottlenecks */
-.bottleneck-row { padding: 2px 0; }
-.bottleneck-row.bottleneck-warn { color: #c0392b; font-weight: 600; }
+/* 세그먼트 병목 신호 종합(A5, docs/13-ai-reasoning-dev-plan.md) — #route-bottlenecks.
+   종류별 그룹 + 요약 배지 + 특수공역 접기(사용자 피드백 "글이 너무 많아서 읽기 싫은
+   정도" → "눈에 확 들어오게 정리", 2026-07-24) — route-bottlenecks.js 참고. */
+.bottleneck-summary { display: flex; gap: 10px; margin: 6px 0 10px; font-size: 12px; font-weight: 700; }
+.bottleneck-summary-warn { color: var(--overlay-danger); }
+.bottleneck-summary-info { color: var(--overlay-text-soft); }
+.bottleneck-group { margin-top: 10px; }
+.bottleneck-group:first-of-type { margin-top: 0; }
+.bottleneck-group-header {
+  font-size: 10.5px; font-weight: 700; color: var(--overlay-text-soft);
+  text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 3px;
+}
+.bottleneck-row {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 4px 8px; margin-top: 3px; border-radius: 6px;
+  border-left: 3px solid rgba(255,255,255,0.12);
+}
+.bottleneck-row .bn-icon { flex: none; }
+.bottleneck-row.bottleneck-warn { background: rgba(255,107,107,0.18); border-left-color: var(--overlay-danger); font-weight: 600; }
+.bottleneck-more-btn {
+  margin-top: 4px; font-size: 11.5px; background: rgba(255,255,255,0.05); cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; padding: 3px 8px; color: var(--overlay-text-soft);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.bottleneck-more-btn:hover { color: var(--overlay-text); border-color: rgba(255,255,255,0.28); }
 
 .error { color: #c0392b; font-size: 12px; }
+
+/* AI 근거화 (C2, docs/13-ai-reasoning-dev-plan.md STEP C2) — 트리거 버튼 + 팝업(<dialog>).
+   다크 오버레이 테마(사용자 요청 "디자인이 올드함 → 세련되게", 2026-07-24) — 각진 ink색
+   테두리 대신 그림자로 뜬 느낌, 단계(1·2·3)는 원형 숫자 배지로 위저드처럼 구분. */
+.reasoning-open-btn {
+  align-self: flex-start;
+  background: var(--orange); color: var(--paper); border: none; border-radius: 8px;
+  padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+.reasoning-open-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.reasoning-dialog {
+  width: min(560px, 92vw); max-height: 86vh; overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 0;
+  background: var(--overlay-bg); color: var(--overlay-text);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+}
+.reasoning-dialog::backdrop { background: rgba(5,8,12,0.6); backdrop-filter: blur(3px); }
+.reasoning-dialog .drawer-header { padding: 14px 18px; background: var(--overlay-bg2); border-radius: 16px 16px 0 0; }
+
+/* FOIS/흐름관리/ACDM 조회 팝업 — reasoning-dialog와 같은 <dialog> 메커니즘(showModal/backdrop)을
+   쓰지만, 폼 내부(.field/.fois-causes 등)가 이미 라이트 톤(--ink/--paper) 기준으로 스타일돼
+   있어 다크 오버레이 테마 대신 라이트 톤으로 맞춘다(전면 재염색 방지, 최소 변경). */
+.query-dialog {
+  width: min(480px, 92vw); max-height: 86vh; overflow-y: auto;
+  border: 1px solid rgba(34,48,60,0.14); border-radius: 16px; padding: 0;
+  background: var(--paper); color: var(--ink);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.28);
+}
+.query-dialog::backdrop { background: rgba(5,8,12,0.45); backdrop-filter: blur(2px); }
+.query-dialog-header {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; background: var(--paper); border-bottom: 1px solid rgba(34,48,60,0.1);
+  border-radius: 16px 16px 0 0;
+}
+.query-dialog-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin: 0; }
+.query-dialog-header button {
+  border: none; background: none; cursor: pointer; font-size: 20px; line-height: 1;
+  color: var(--ink-soft); padding: 2px 6px; border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.query-dialog-header button:hover { color: var(--ink); background: rgba(34,48,60,0.08); }
+.query-dialog-body { padding: 14px 18px 18px; }
+.reasoning-advisory {
+  margin: 0; padding: 10px 18px; background: rgba(29,95,174,0.14);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px; color: var(--overlay-text-soft);
+}
+.reasoning-step { padding: 14px 18px; border-top: 1px solid rgba(255,255,255,0.07); display: flex; flex-direction: column; gap: 8px; }
+.reasoning-step h3, .reasoning-result h3 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--overlay-text-soft); margin: 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.reasoning-step h3::before, .reasoning-result h3::before {
+  content: ""; width: 18px; height: 18px; border-radius: 50%; flex: none;
+  background: rgba(232,89,12,0.18); border: 1px solid rgba(232,89,12,0.4);
+}
+.reasoning-textarea {
+  width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; resize: vertical;
+  background: var(--overlay-bg2); color: var(--overlay-text);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px 10px;
+}
+.reasoning-textarea:focus { outline: none; border-color: var(--orange); }
+.reasoning-textarea::placeholder { color: var(--overlay-text-soft); }
+.reasoning-step button, .reasoning-result button {
+  align-self: flex-start; background: rgba(255,255,255,0.06); color: var(--overlay-text);
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; padding: 6px 12px;
+  font-size: 12px; font-family: inherit; cursor: pointer; transition: background-color 0.15s ease;
+}
+.reasoning-step button:hover { background: rgba(255,255,255,0.12); }
+.reasoning-dialog .error { color: var(--overlay-danger); }
+.reasoning-result { padding: 14px 18px; border-top: 1px solid rgba(255,255,255,0.07); }
+#reasoning-result-why { font-size: 13px; margin-bottom: 8px; }
+.bottleneck-list { margin: 0; padding-left: 18px; font-size: 12px; }
+.bottleneck-list li.bottleneck-warn { color: var(--overlay-danger); font-weight: 600; }
+.reasoning-caveats { margin: 6px 0 0; padding-left: 18px; font-size: 11px; color: var(--overlay-text-soft); }
 
 #map-wrap { position: relative; }
 #map { width: 100%; height: 100%; background: #dfe7ec; }
@@ -151,12 +338,44 @@ html, body {
 .route-fois-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
 .route-flow-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
 
+/* 지도 클릭 팝업 전역(FIR/절차/항행/SIGMET/PIREP 등 모든 bindPopup 공용 wrapper) — 다크
+   오버레이 테마로 통일(사용자 요청 "툴팁 디자인이 올드함 → 세련되게", 2026-07-24). 각 팝업의
+   내용(HTML)은 그대로 두고 Leaflet 기본 흰 박스 껍데기만 교체한다. */
+.leaflet-popup-content-wrapper {
+  background: var(--overlay-bg);
+  color: var(--overlay-text);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+.leaflet-popup-content { margin: 10px 14px; line-height: 1.5; }
+.leaflet-popup-tip { background: var(--overlay-bg); box-shadow: none; }
+/* leaflet.css 자체가 `.leaflet-container a.leaflet-popup-close-button`(복합 선택자)로 색을
+   지정하므로, !important 없이 이기려면 동일한 선택자 형태를 맞춰야 한다(리뷰 지적,
+   2026-07-24) — style.css가 leaflet.css보다 나중에 로드되므로 소스 순서로 승리. */
+.leaflet-container a.leaflet-popup-close-button { color: var(--overlay-text-soft); }
+.leaflet-container a.leaflet-popup-close-button:hover { color: var(--overlay-text); }
+
+/* 웨이포인트 호버 툴팁(reference.js className: "ref-tooltip") — 같은 다크 톤이지만 팝업과
+   구분되는 작은 캡슐 형태. aircraft-label/route-time-marker-label은 자체 배경을 이미
+   지정해 이 규칙의 영향을 받지 않는다(둘 다 더 구체적인 클래스로 별도 정의됨). */
+.leaflet-tooltip.ref-tooltip {
+  background: var(--overlay-bg); color: var(--overlay-text);
+  border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+/* 현재는 direction:"top"만 쓰지만(reference.js), 다른 방향으로도 재사용될 경우를 대비해
+   네 방향 화살표 색을 전부 맞춰둔다(리뷰 지적, 2026-07-24). */
+.leaflet-tooltip-top.ref-tooltip::before { border-top-color: var(--overlay-bg); }
+.leaflet-tooltip-bottom.ref-tooltip::before { border-bottom-color: var(--overlay-bg); }
+.leaflet-tooltip-left.ref-tooltip::before { border-left-color: var(--overlay-bg); }
+.leaflet-tooltip-right.ref-tooltip::before { border-right-color: var(--overlay-bg); }
+
 .weather-popup { font-size: 12px; max-width: 260px; }
 .weather-popup .headline { font-weight: 700; }
-.weather-popup .risk { color: #c0392b; }
+.weather-popup .risk { color: var(--overlay-danger); }
 .weather-popup details { margin-top: 4px; }
 .weather-popup .taf-row { display: flex; gap: 6px; }
-.weather-popup .taf-row.tempo { color: var(--ink-soft); }
+.weather-popup .taf-row.tempo { color: var(--overlay-text-soft); }
 
 #toast-root { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 2000; }
 .toast { background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 6px; font-size: 12px; margin-top: 6px; }
@@ -189,6 +408,19 @@ html, body {
   white-space: nowrap;
 }
 .route-badge.arr { background: var(--orange); }
+
+/* 선택 경로 예상 위치(30/60/90분 후, 사용자 요청 2026-07-24) — DEP/ARR 배지·FIR 뱃지와
+   같은 중립 UI 색(ink/paper)을 재사용. 새 의미 카테고리가 아니라 순수 위치 라벨이라
+   위험/상태색과 충돌 우려가 없어 신규 토큰을 만들지 않음. */
+.route-time-marker-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
 
 .navaid-triangle {
   width: 0; height: 0;
@@ -249,3 +481,21 @@ html, body {
 .stca-row.caution { color: var(--stca-caution); }
 .stca-row.cpa { color: var(--cpa-purple); cursor: pointer; }
 .stca-row .stca-meta { color: var(--ink-soft); margin-left: 6px; }
+
+/* Smooth transition for interactive elements */
+button, .segmented button, .chip {
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+/* Subtle scrollbar styling (light panels) */
+.panel::-webkit-scrollbar, .query-dialog::-webkit-scrollbar { width: 8px; }
+.panel::-webkit-scrollbar-thumb, .query-dialog::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
+
+/* 다크 오버레이(드로어·AI 근거 다이얼로그) 전용 스크롤바 */
+.drawer::-webkit-scrollbar, .reasoning-dialog::-webkit-scrollbar { width: 8px; }
+.drawer::-webkit-scrollbar-thumb, .reasoning-dialog::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.14); border-radius: 4px;
+}
+.drawer::-webkit-scrollbar-thumb:hover, .reasoning-dialog::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.22);
+}

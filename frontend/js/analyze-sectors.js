@@ -225,6 +225,11 @@ export function createSectorPanel(CONFIG) {
     // 잠깐(새 경로 데이터로 덮어써지기 전까지) 엉뚱한 경로의 교통량을 보여줄 수 있었다
     // (리뷰 지적, 2026-07-24).
     currentSectorIds = null;
+    // getDemand()가 이 await 동안 이전 경로의 값을 반환하던 버그(리뷰 지적, 2026-07-24 —
+    // wind.js의 cached와 동일한 종류·동일한 이유: route-bottlenecks.js의 기존 소비 경로는
+    // 항상 이 update()가 끝난 뒤에만 읽어 영향이 없었지만, C2 reasoning-panel.js가 이
+    // getter를 직접 읽으면서 처음 드러남) — currentSectorIds와 동일하게 동기적으로 비운다.
+    lastDemand = null;
     if (panelEl) {
       panelEl.hidden = false;
       panelEl.innerHTML = "";

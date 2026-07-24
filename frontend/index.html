@@ -18,6 +18,20 @@
       <button data-mode="world" role="tab" aria-selected="false">전세계</button>
     </div>
     <div id="adsb-chip" class="chip" title="실시간 항공기">ADS-B --</div>
+    <div id="query-tools" class="query-tools">
+      <button id="fois-open-btn" type="button" class="icon-btn" title="FOIS 지연원인 조회" aria-label="FOIS 지연원인 조회">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.2 2"/></svg>
+        <span>FOIS</span>
+      </button>
+      <button id="flow-open-btn" type="button" class="icon-btn" title="흐름관리 조치 조회" aria-label="흐름관리 조치 조회">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7h13a3.5 3.5 0 0 1 0 7H8"/><path d="M11 11 8 14l3 3"/></svg>
+        <span>흐름관리</span>
+      </button>
+      <button id="ops-open-btn" type="button" class="icon-btn" title="공항 운항 KPI(ACDM) 조회" aria-label="공항 운항 KPI(ACDM) 조회">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 19V10M12 19V5M19 19v-7"/></svg>
+        <span>ACDM</span>
+      </button>
+    </div>
   </header>
 
   <main id="layout">
@@ -34,10 +48,52 @@
       <div id="route-briefing" class="briefing"></div>
       <ol id="route-options" class="route-options"></ol>
       <p id="route-error" class="error" hidden></p>
-      <div id="route-wind" class="route-wind" hidden></div>
-      <div id="sector-panel" class="route-wind" hidden></div>
-      <div id="route-bottlenecks" class="route-wind" hidden></div>
     </section>
+
+    <aside id="route-detail-drawer" class="drawer" hidden>
+      <div class="drawer-header">
+        <h2>경로 상세정보</h2>
+        <button id="route-detail-close" type="button" aria-label="닫기">×</button>
+      </div>
+      <div class="drawer-body">
+        <div id="route-wind" class="route-wind" hidden></div>
+        <div id="sector-panel" class="route-wind" hidden></div>
+        <div id="route-bottlenecks" class="route-wind" hidden></div>
+        <button id="reasoning-open-btn" type="button" class="reasoning-open-btn" hidden>AI 근거 보기</button>
+      </div>
+    </aside>
+
+    <dialog id="reasoning-dialog" class="reasoning-dialog">
+      <div class="drawer-header">
+        <h2>AI 근거 보기</h2>
+        <button id="reasoning-close-btn" type="button" aria-label="닫기">×</button>
+      </div>
+      <p class="reasoning-advisory">이 내용은 AI 자문(advisory) 참고용이며, 최종 판단은 관제·운항 담당자에게 있습니다.</p>
+
+      <section class="reasoning-step">
+        <h3>1. 프롬프트</h3>
+        <p class="muted">아래 프롬프트를 복사해 외부 AI(챗봇 등)에 붙여넣으세요.</p>
+        <textarea id="reasoning-prompt-text" class="reasoning-textarea" rows="8" readonly></textarea>
+        <button id="reasoning-copy-btn" type="button">프롬프트 복사</button>
+        <span id="reasoning-copy-status" class="muted" aria-live="polite"></span>
+      </section>
+
+      <section class="reasoning-step">
+        <h3>2. AI 응답 붙여넣기</h3>
+        <p class="muted">AI로부터 받은 JSON 응답 전체를 그대로 붙여넣으세요.</p>
+        <textarea id="reasoning-response-input" class="reasoning-textarea" rows="8" placeholder='{"why": "...", "bottlenecks": [...], "caveats": [...]}'></textarea>
+        <button id="reasoning-apply-btn" type="button">응답 적용</button>
+        <p id="reasoning-parse-error" class="error" hidden></p>
+      </section>
+
+      <section id="reasoning-result" class="reasoning-result" hidden>
+        <h3>3. 근거 요약</h3>
+        <div id="reasoning-result-why"></div>
+        <ol id="reasoning-result-bottlenecks" class="bottleneck-list"></ol>
+        <ul id="reasoning-result-caveats" class="reasoning-caveats"></ul>
+        <p id="reasoning-result-notice" class="muted" hidden></p>
+      </section>
+    </dialog>
 
     <section id="map-wrap">
       <div id="map"></div>
@@ -56,73 +112,94 @@
       <div id="route-ops-summary" class="route-ops-summary muted"></div>
       <div id="route-fois-summary" class="route-fois-summary muted"></div>
       <div id="route-flow-summary" class="route-flow-summary muted"></div>
-
-      <h2>FOIS 지연원인</h2>
-      <form id="fois-form">
-        <div class="field">
-          <label for="fois-direction">구분</label>
-          <select id="fois-direction">
-            <option value="dep">출발</option>
-            <option value="arr">도착</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="fois-airport">공항 ICAO (선택)</label>
-          <input id="fois-airport" type="text" maxlength="4" placeholder="예: RKSI" />
-        </div>
-        <div class="field fois-date-range">
-          <label for="fois-date-from">기간 (선택)</label>
-          <input id="fois-date-from" type="date" />
-          <span aria-hidden="true">~</span>
-          <input id="fois-date-to" type="date" />
-        </div>
-        <button id="fois-search-btn" type="submit">조회</button>
-      </form>
-      <p id="fois-summary" class="muted"></p>
-      <ol id="fois-causes" class="fois-causes"></ol>
-      <p id="fois-error" class="error" hidden></p>
-
-      <h2>흐름관리 조치</h2>
-      <form id="flow-form">
-        <div class="field fois-date-range">
-          <label for="flow-date-from">기간 (선택)</label>
-          <input id="flow-date-from" type="date" />
-          <span aria-hidden="true">~</span>
-          <input id="flow-date-to" type="date" />
-        </div>
-        <div class="field">
-          <label for="flow-fir">대상 FIR (선택)</label>
-          <input id="flow-fir" type="text" maxlength="10" placeholder="예: RKRR" />
-        </div>
-        <div class="field">
-          <label for="flow-airway">대상 항공로 (선택)</label>
-          <input id="flow-airway" type="text" maxlength="10" placeholder="예: A591" />
-        </div>
-        <button id="flow-search-btn" type="submit">조회</button>
-      </form>
-      <p id="flow-summary" class="muted"></p>
-      <ol id="flow-items" class="flow-items"></ol>
-      <button id="flow-more-btn" type="button" hidden>더 보기</button>
-      <p id="flow-error" class="error" hidden></p>
-
-      <h2>공항 운항 KPI (ACDM)</h2>
-      <form id="ops-form">
-        <div class="field">
-          <label for="ops-airport">공항 ICAO</label>
-          <input id="ops-airport" type="text" maxlength="4" placeholder="예: RKSI" required />
-        </div>
-        <div class="field fois-date-range">
-          <label for="ops-date-from">기간 (선택)</label>
-          <input id="ops-date-from" type="date" />
-          <span aria-hidden="true">~</span>
-          <input id="ops-date-to" type="date" />
-        </div>
-        <button id="ops-search-btn" type="submit">조회</button>
-      </form>
-      <p id="ops-summary" class="muted"></p>
-      <dl id="ops-result" class="ops-result" hidden></dl>
-      <p id="ops-error" class="error" hidden></p>
     </section>
+
+    <dialog id="fois-dialog" class="query-dialog">
+      <div class="query-dialog-header">
+        <h2>FOIS 지연원인</h2>
+        <button id="fois-dialog-close" type="button" aria-label="닫기">×</button>
+      </div>
+      <div class="query-dialog-body">
+        <form id="fois-form">
+          <div class="field">
+            <label for="fois-direction">구분</label>
+            <select id="fois-direction">
+              <option value="dep">출발</option>
+              <option value="arr">도착</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fois-airport">공항 ICAO (선택)</label>
+            <input id="fois-airport" type="text" maxlength="4" placeholder="예: RKSI" />
+          </div>
+          <div class="field fois-date-range">
+            <label for="fois-date-from">기간 (선택)</label>
+            <input id="fois-date-from" type="date" />
+            <span aria-hidden="true">~</span>
+            <input id="fois-date-to" type="date" />
+          </div>
+          <button id="fois-search-btn" type="submit">조회</button>
+        </form>
+        <p id="fois-summary" class="muted"></p>
+        <ol id="fois-causes" class="fois-causes"></ol>
+        <p id="fois-error" class="error" hidden></p>
+      </div>
+    </dialog>
+
+    <dialog id="flow-dialog" class="query-dialog">
+      <div class="query-dialog-header">
+        <h2>흐름관리 조치</h2>
+        <button id="flow-dialog-close" type="button" aria-label="닫기">×</button>
+      </div>
+      <div class="query-dialog-body">
+        <form id="flow-form">
+          <div class="field fois-date-range">
+            <label for="flow-date-from">기간 (선택)</label>
+            <input id="flow-date-from" type="date" />
+            <span aria-hidden="true">~</span>
+            <input id="flow-date-to" type="date" />
+          </div>
+          <div class="field">
+            <label for="flow-fir">대상 FIR (선택)</label>
+            <input id="flow-fir" type="text" maxlength="10" placeholder="예: RKRR" />
+          </div>
+          <div class="field">
+            <label for="flow-airway">대상 항공로 (선택)</label>
+            <input id="flow-airway" type="text" maxlength="10" placeholder="예: A591" />
+          </div>
+          <button id="flow-search-btn" type="submit">조회</button>
+        </form>
+        <p id="flow-summary" class="muted"></p>
+        <ol id="flow-items" class="flow-items"></ol>
+        <button id="flow-more-btn" type="button" hidden>더 보기</button>
+        <p id="flow-error" class="error" hidden></p>
+      </div>
+    </dialog>
+
+    <dialog id="ops-dialog" class="query-dialog">
+      <div class="query-dialog-header">
+        <h2>공항 운항 KPI (ACDM)</h2>
+        <button id="ops-dialog-close" type="button" aria-label="닫기">×</button>
+      </div>
+      <div class="query-dialog-body">
+        <form id="ops-form">
+          <div class="field">
+            <label for="ops-airport">공항 ICAO</label>
+            <input id="ops-airport" type="text" maxlength="4" placeholder="예: RKSI" required />
+          </div>
+          <div class="field fois-date-range">
+            <label for="ops-date-from">기간 (선택)</label>
+            <input id="ops-date-from" type="date" />
+            <span aria-hidden="true">~</span>
+            <input id="ops-date-to" type="date" />
+          </div>
+          <button id="ops-search-btn" type="submit">조회</button>
+        </form>
+        <p id="ops-summary" class="muted"></p>
+        <dl id="ops-result" class="ops-result" hidden></dl>
+        <p id="ops-error" class="error" hidden></p>
+      </div>
+    </dialog>
   </main>
 
   <div id="weather-popup-root"></div>

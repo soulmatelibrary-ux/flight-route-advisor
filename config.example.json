@@ -21,7 +21,8 @@
     "homeWaypointCountry": "KS",
     "waypointRadius": { "home": 1.5, "foreign": 0.8 },
     "minSampleForCongestionTag": 5,
-    "routeDiffThresholdNm": 20
+    "routeDiffThresholdNm": 20,
+    "routeTimeMarkerStepMin": 30
   },
   "tokens": {
     "ink": "#22303c",
@@ -36,6 +37,8 @@
     "aircraftGround": "#aeb7bf",
     "aircraftOutline": "#4a5560",
     "aircraftHalo": "rgba(255,255,255,0.95)",
+    "aircraftIcnDep": "#0c8599",
+    "aircraftIcnArr": "#d6336c",
     "shearWeak": "#2e7d32",
     "shearModerate": "#e8590c",
     "shearStrong": "#d62828",
@@ -117,5 +120,14 @@
     "trafficThresholds": [7, 12],
     "trendDelta": 2,
     "forecastMinutes": [10, 40]
+  },
+  "reasoning": {
+    "responseMaxRawLen": 20000,
+    "whyMaxLen": 2000,
+    "maxBottlenecks": 20,
+    "segMaxLen": 200,
+    "reasonMaxLen": 500,
+    "maxCaveats": 10,
+    "caveatMaxLen": 300
   }
 }

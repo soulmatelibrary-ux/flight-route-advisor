@@ -29,9 +29,11 @@ def envelope(
 _ERROR_CODES: dict[int, str] = {
     400: "BAD_REQUEST",
     404: "NOT_FOUND",
+    413: "PAYLOAD_TOO_LARGE",  # middleware.py::MaxBodySizeMiddleware
     422: "VALIDATION_ERROR",
     429: "RATE_LIMITED",
     500: "INTERNAL_ERROR",
+    501: "NOT_IMPLEMENTED",  # routers/reasoning.py — 모드 C 스켈레톤(미활성)
     503: "SERVICE_UNAVAILABLE",
 }
 

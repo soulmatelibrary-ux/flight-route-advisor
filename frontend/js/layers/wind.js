@@ -311,6 +311,12 @@ export function createWindLayer(map, CONFIG) {
   async function update(coords, cruiseParity) {
     const mySeq = ++seq;
     manualFL = null;
+    // getRecommendation()이 진행 중인 조회 동안 이전 경로의 값을 반환하던 버그(리뷰 지적,
+    // 2026-07-24, C2 reasoning-panel.js가 이 getter를 route-bottlenecks.js를 거치지 않고
+    // 직접 읽으면서 처음 드러남 — bottlenecksPanel.update()가 이미 이 await 이후에만
+    // 읽어서 기존 소비자는 영향이 없었다) — cached도 lastFlowImpact/lastSuasItems와 동일하게
+    // await 전에 동기적으로 비운다.
+    cached = null;
     shearLayer.clearLayers();
     if (panelEl) {
       panelEl.hidden = false;
