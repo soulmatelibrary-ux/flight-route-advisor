@@ -21,7 +21,6 @@ class UploadSlot:
     required: bool
     accept: tuple[str, ...]
     file_type: str  # raw_files.file_type 값(DB스키마.md §3.1 CHECK 허용값과 반드시 일치)
-    raw_table: str  # 이 슬롯 파일이 적재되는 raw_*_rows 테이블명(loaders.py가 참조)
     paired: bool = False
 
 
@@ -68,7 +67,6 @@ class SkillDescriptor:
     result: ResultParse
     validator: ValidatorSpec
     outputs: tuple[OutputTableMap, ...]
-    raw_tables: tuple[str, ...]
 
 
 FLIGHT_DATA = SkillDescriptor(
@@ -78,11 +76,11 @@ FLIGHT_DATA = SkillDescriptor(
     upload_slots=(
         UploadSlot(
             "analysis", required=True, accept=(".xlsx", ".xls", ".csv"),
-            file_type="flight_analysis", raw_table="raw_flight_analysis_rows", paired=True,
+            file_type="flight_analysis", paired=True,
         ),
         UploadSlot(
             "search", required=True, accept=(".xlsx", ".xls", ".csv"),
-            file_type="flight_search", raw_table="raw_flight_search_rows", paired=True,
+            file_type="flight_search", paired=True,
         ),
     ),
     layout=LayoutRule(
@@ -101,7 +99,6 @@ FLIGHT_DATA = SkillDescriptor(
         arg_style="positional_csv",
     ),
     outputs=(OutputTableMap("OUTPUT", "processed_flight_data", "processed_flight_data"),),
-    raw_tables=("raw_flight_analysis_rows", "raw_flight_search_rows"),
 )
 
 ACDM = SkillDescriptor(
@@ -115,11 +112,11 @@ ACDM = SkillDescriptor(
     upload_slots=(
         UploadSlot(
             "departure_file", required=True, accept=(".csv", ".xlsx", ".xls"),
-            file_type="acdm_departure", raw_table="raw_acdm_departure_rows",
+            file_type="acdm_departure",
         ),
         UploadSlot(
             "arrival_file", required=True, accept=(".csv", ".xlsx", ".xls"),
-            file_type="acdm_arrival", raw_table="raw_acdm_arrival_rows",
+            file_type="acdm_arrival",
         ),
     ),
     layout=LayoutRule(
@@ -141,7 +138,6 @@ ACDM = SkillDescriptor(
         OutputTableMap("departure_output", "processed_acdm_departure", "processed_acdm_departure"),
         OutputTableMap("arrival_output", "processed_acdm_arrival", "processed_acdm_arrival"),
     ),
-    raw_tables=("raw_acdm_departure_rows", "raw_acdm_arrival_rows"),
 )
 
 FOIS = SkillDescriptor(
@@ -153,11 +149,11 @@ FOIS = SkillDescriptor(
     upload_slots=(
         UploadSlot(
             "departure", required=True, accept=(".xlsx", ".xls", ".csv"),
-            file_type="fois_departure", raw_table="raw_fois_departure_rows",
+            file_type="fois_departure",
         ),
         UploadSlot(
             "arrival", required=True, accept=(".xlsx", ".xls", ".csv"),
-            file_type="fois_arrival", raw_table="raw_fois_arrival_rows",
+            file_type="fois_arrival",
         ),
     ),
     layout=LayoutRule(
@@ -179,7 +175,6 @@ FOIS = SkillDescriptor(
         OutputTableMap("DEPARTURE_OUTPUT", "processed_fois_departure", "processed_fois_departure"),
         OutputTableMap("ARRIVAL_OUTPUT", "processed_fois_arrival", "processed_fois_arrival"),
     ),
-    raw_tables=("raw_fois_departure_rows", "raw_fois_arrival_rows"),
 )
 
 FLOW_MANAGEMENT = SkillDescriptor(
@@ -189,7 +184,7 @@ FLOW_MANAGEMENT = SkillDescriptor(
     upload_slots=(
         UploadSlot(
             "file", required=True, accept=(".xlsx", ".xls", ".csv"),
-            file_type="flow_management", raw_table="raw_flow_management_rows",
+            file_type="flow_management",
         ),
     ),
     layout=LayoutRule(
@@ -205,7 +200,6 @@ FLOW_MANAGEMENT = SkillDescriptor(
         arg_style="report",
     ),
     outputs=(OutputTableMap("event_output", "processed_flow_management", "processed_flow_management"),),
-    raw_tables=("raw_flow_management_rows",),
 )
 
 _REGISTRY: dict[str, SkillDescriptor] = {

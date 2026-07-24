@@ -31,7 +31,8 @@ export function kst(value) {
   return `${utcStr} (KST ${pad(kstDate.getUTCHours())}:${pad(kstDate.getUTCMinutes())})`;
 }
 
-function windLine(m) {
+/** METAR → 한국어 바람 서술. reasoning-context.js(B2)가 airport_wx 조립에 재사용(로직 중복 방지). */
+export function windLine(m) {
   if (!m.wspd) return "무풍";
   const dir = m.wdir === 0 ? "VRB" : `${m.wdir}°`;
   let s = `${dir} ${m.wspd}kt`;

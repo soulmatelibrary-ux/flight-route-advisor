@@ -118,9 +118,9 @@ def _log_exclusions(engine, run_id: uuid.UUID, descriptor: SkillDescriptor, pars
     이미 입력/출력/제외 행수를 직접 계산해 주므로 그대로 옮긴다(우리가 별도로 재계산하지
     않음 — 스킬을 블랙박스로 다루는 원칙, docs/06 §5).
     흐름관리일지: `Seq`가 숫자가 아닌 행(안내문·빈 줄 등)은 스킬이 원본을 읽는 시점에
-    바로 걸러내 stdout 리포트에 "제외 전" 행수가 아예 남지 않는다 — 그래서 우리가 이미
-    적재해 둔 raw_flow_management_rows 행수(원본을 그대로 읽은 값)와 스킬이 보고한
-    이벤트 행수의 차이로 역산한다.
+    바로 걸러내 stdout 리포트에 "제외 전" 행수가 아예 남지 않는다 — 그래서 원본 파일의
+    전체 행수(`raw_files.row_count`, 원본을 그대로 읽은 값)와 스킬이 보고한 이벤트
+    행수의 차이로 역산한다.
     """
     if descriptor.run_type == "acdm":
         for direction, label in (("departure", "출발"), ("arrival", "도착")):

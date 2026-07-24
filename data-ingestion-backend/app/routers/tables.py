@@ -1,14 +1,16 @@
-"""테이블 전체 조회 페이지 — run 하나에 매인 게 아니라 raw_*_rows/processed_* 13종
-전체를 run과 무관하게 훑어볼 수 있게 한다(사용자 요청: DB 클라이언트 없이 이 앱만으로
-적재된 각 테이블을 확인). run 상세 페이지의 `/runs/{id}/data/{table}`(run 하나로 범위
-한정, 화이트리스트도 그 run_type 것만)와 달리 여기는 테이블 자체가 화이트리스트다.
+"""테이블 전체 조회 페이지 — run 하나에 매인 게 아니라 processed_* 6종 전체를 run과
+무관하게 훑어볼 수 있게 한다(사용자 요청: DB 클라이언트 없이 이 앱만으로 적재된 각
+테이블을 확인). run 상세 페이지의 `/runs/{id}/data/{table}`(run 하나로 범위 한정,
+화이트리스트도 그 run_type 것만)와 달리 여기는 테이블 자체가 화이트리스트다.
+
+raw_*_rows(원본 행 단위 복제 테이블) 7종은 2026-07-24 폐지되어 이 페이지에서도
+빠졌다 — 원본 확인은 run 상세 페이지의 입력 파일 목록(raw_files 메타)으로 한다.
 """
 
 from __future__ import annotations
 
 import csv
 import io
-import json
 from pathlib import Path
 from typing import Iterator
 from uuid import UUID
@@ -18,8 +20,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS, COLUMN_DESCRIPTIONS
-from app.db.models import PROCESSED_TABLES, RAW_ROW_TABLES
+from app.db.column_map import PROCESSED_COLUMNS, COLUMN_DESCRIPTIONS
+from app.db.models import PROCESSED_TABLES
 from app.db.session import get_engine
 
 router = APIRouter()
@@ -30,18 +32,11 @@ _DATA_PAGE_SIZE_DEFAULT = 50
 _DATA_PAGE_SIZE_MAX = 200
 _CSV_EXPORT_CHUNK_SIZE = 5000
 
-# run과 무관한 전체 목록이라 화이트리스트는 이 앱이 아는 테이블 전부(13종) — run_type별
-# 제한은 여기서 의미가 없다(어차피 전체를 보여주는 게 목적).
-_ALL_TABLES: dict[str, bool] = {**{name: True for name in RAW_ROW_TABLES}, **{name: False for name in PROCESSED_TABLES}}
-
 
 def _resolve_table(table_name: str):
-    if table_name not in _ALL_TABLES:
+    if table_name not in PROCESSED_TABLES:
         raise HTTPException(404, f"알 수 없는 테이블: {table_name!r}")
-    is_raw = _ALL_TABLES[table_name]
-    table = RAW_ROW_TABLES[table_name] if is_raw else PROCESSED_TABLES[table_name]
-    pairs = RAW_TABLE_COLUMNS[table_name] if is_raw else PROCESSED_COLUMNS[table_name]
-    return table, pairs, is_raw
+    return PROCESSED_TABLES[table_name], PROCESSED_COLUMNS[table_name]
 
 
 @router.get("/tables", response_class=HTMLResponse)
@@ -49,10 +44,9 @@ def list_tables(request: Request) -> HTMLResponse:
     engine = get_engine()
     rows = []
     with engine.connect() as conn:
-        for name, is_raw in sorted(_ALL_TABLES.items()):
-            table = RAW_ROW_TABLES[name] if is_raw else PROCESSED_TABLES[name]
+        for name, table in sorted(PROCESSED_TABLES.items()):
             count = conn.execute(sa.select(sa.func.count()).select_from(table)).scalar_one()
-            rows.append({"name": name, "is_raw": is_raw, "count": count})
+            rows.append({"name": name, "count": count})
     return templates.TemplateResponse("tables.html", {"request": request, "tables": rows})
 
 
@@ -66,7 +60,7 @@ def table_data(
     조각(제목·nav·스타일시트 없는 본문)만 렌더링한다(사용자 요청: 테이블 클릭 시 페이지
     이동 없이 바로 표시) — 사람이 브라우저로 직접 열어보는 용도가 아니라 tables.js
     전용이다."""
-    table, pairs, is_raw = _resolve_table(table_name)
+    table, pairs = _resolve_table(table_name)
     engine = get_engine()
 
     page = max(page, 1)
@@ -99,7 +93,6 @@ def table_data(
         {
             "request": request,
             "table_name": table_name,
-            "is_raw": is_raw,
             "columns": columns,
             "rows": rows,
             "page": page,
@@ -117,12 +110,10 @@ def download_table_csv(table_name: str, run_id: UUID | None = None) -> Streaming
     """이 테이블 전체(또는 run_id로 좁힌 부분)를 CSV로 내려받는다. run_data.download_data_csv와
     동일하게 REPEATABLE READ 한 트랜잭션 + 커서 페이지네이션으로 스트리밍한다(동시 삭제로
     인한 조용한 중도절단 방지, 코드리뷰 2026-07-21)."""
-    table, pairs, is_raw = _resolve_table(table_name)
+    table, pairs = _resolve_table(table_name)
     engine = get_engine()
 
-    header = (["run_id", "source_row_number"] if is_raw else ["run_id"]) + [logical for logical, _ in pairs] + (
-        ["extra_columns"] if is_raw else []
-    )
+    header = ["run_id"] + [logical for logical, _ in pairs]
     physical_cols = [physical for _, physical in pairs]
     conds = [table.c.run_id == run_id] if run_id else []
 
@@ -147,12 +138,7 @@ def download_table_csv(table_name: str, run_id: UUID | None = None) -> Streaming
                 buf = io.StringIO()
                 writer = csv.writer(buf)
                 for r in chunk:
-                    extra = json.dumps(r["extra_columns"], ensure_ascii=False) if is_raw else None
-                    line = (
-                        [r["run_id"]] + ([r["source_row_number"]] if is_raw else [])
-                        + [r[c] for c in physical_cols]
-                        + ([extra] if is_raw else [])
-                    )
+                    line = [r["run_id"]] + [r[c] for c in physical_cols]
                     writer.writerow(line)
                 yield buf.getvalue()
                 last_id = chunk[-1]["id"]

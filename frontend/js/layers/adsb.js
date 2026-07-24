@@ -19,6 +19,11 @@
  * 원본 05_트러블슈팅.md("ADS-B 전체 실패... 3연속 실패 시 30초 백오프, 마지막 데이터 유지")
  * 규칙을 그대로 이식: 연속 실패 카운터로 폴링 간격을 30초로 늘리고, 실패해도 기존 마커는
  * 지우지 않는다(성공 시 즉시 기본 간격 복귀).
+ *
+ * 인천(ICN/RKSI) 도착·출발 아이콘 색상 구분(사용자 요청, 2026-07-24) — 위 routeCodes
+ * 캐시를 그대로 재사용해(`icnCategory`) 판정하므로 별도 조회가 추가되지 않는다. 노선이
+ * 아직 캐시에 없거나(배치 조회 대기 중) 조회 실패(빈 문자열)면 영공통과와 동일하게
+ * 기본색을 쓴다 — 근거 없이 도착/출발로 단정하지 않는다.
  */
 import { createFallbackFetcher } from "../net.js";
 import { escapeHtml } from "../html.js";
@@ -37,6 +42,23 @@ const PLANE_PATH =
   "M0,-9 Q1.4,-7.5 1.4,-4.8 L1.4,-2.0 L8.6,3.0 L8.6,4.6 L1.4,2.6 L1.2,5.6 L3.8,7.8 L3.8,9.0 " +
   "L0.8,8.2 L0,8.6 L-0.8,8.2 L-3.8,9.0 L-3.8,7.8 L-1.2,5.6 L-1.4,2.6 L-8.6,4.6 L-8.6,3.0 " +
   "L-1.4,-2.0 L-1.4,-4.8 Q-1.4,-7.5 0,-9 Z";
+
+// 인천(ICN/RKSI) 도착·출발 아이콘 색상 구분(사용자 요청, 2026-07-24). routeCodes 캐시
+// (IATA/ICAO 혼용, fetchRouteCodes 참고)의 "출발→도착" 문자열에서 판정한다 — 노선이 아직
+// 조회 전이거나(캐시 미기입) 조회 실패로 노선을 못 찾은 경우(빈 문자열)엔 null을 반환해
+// 기존 기본색(영공통과 포함)을 그대로 쓴다: 근거 없는 분류를 지어내지 않는다.
+const ICN_CODES = new Set(["ICN", "RKSI"]);
+
+function icnCategory(routeCode) {
+  if (!routeCode) return null;
+  // 대소문자·공백은 정규화(리뷰 지적, 2026-07-24) — adsb.lol/adsbdb가 반환하는 코드가
+  // 항상 대문자·trim된 상태라는 보장이 없어, 정규화 없이는 매칭이 조용히 실패해 기본색으로
+  // 새는 문제가 있었다.
+  const [from, to] = routeCode.split("→").map((s) => s?.trim().toUpperCase());
+  if (ICN_CODES.has(to)) return "icnArr";
+  if (ICN_CODES.has(from)) return "icnDep";
+  return null;
+}
 
 function buildPointUrl(template, lat, lon, radiusNm) {
   return template.replace("{lat}", lat.toFixed(2)).replace("{lon}", lon.toFixed(2)).replace("{radiusNm}", String(radiusNm));
@@ -136,8 +158,14 @@ export function createAdsbLayer(map, CONFIG) {
 
   /** alertLevel: null | "caution" | "warn"(근접 경고 STCA) | "cpa"(선택된 동고도 조우 쌍) —
    * 원(circle)은 회전 대칭이라 부모 div의 rotate(track)에 영향받지 않고 항상 정원으로 보인다. */
-  function iconFor(track, isGround, alertLevel) {
-    const fill = isGround ? CONFIG.tokens.aircraftGround : CONFIG.tokens.aircraftYellow;
+  function iconFor(track, isGround, alertLevel, category) {
+    const fill = isGround
+      ? CONFIG.tokens.aircraftGround
+      : category === "icnDep"
+        ? CONFIG.tokens.aircraftIcnDep
+        : category === "icnArr"
+          ? CONFIG.tokens.aircraftIcnArr
+          : CONFIG.tokens.aircraftYellow;
     const ringColor =
       alertLevel === "cpa"
         ? CONFIG.tokens.cpaPurple
@@ -206,8 +234,20 @@ export function createAdsbLayer(map, CONFIG) {
           }
         }
         routeCodes.set(cs, code || "");
-        for (const marker of markersByHex.values()) {
-          if (marker._callsign === cs) marker.setTooltipContent(buildLabelHtml(cs, cs));
+        // 캐시 기록(위 줄) 이후에 렌더 갱신을 시도하므로, 마커별 렌더가 실패해도 배치의
+        // 나머지 편명 조회에는 영향이 없다(리뷰 지적, 2026-07-24 — 이 블록에 try/catch가
+        // 없으면 한 마커의 렌더 예외가 for(cs of batch) 전체를 중단시켜 나머지 편명이
+        // 이번 사이클에 조회조차 안 되는 문제가 있었음).
+        try {
+          for (const [hex, marker] of markersByHex) {
+            if (marker._callsign !== cs) continue;
+            marker.setTooltipContent(buildLabelHtml(cs, cs));
+            // 노선이 방금 확정됐으므로 인천 도착/출발 색상도 즉시 반영(다음 폴링을 기다리지 않음)
+            const ac = acByHex.get(hex);
+            if (ac) marker.setIcon(iconFor(ac.track, ac.alt_baro === "ground", marker._alertLevel, icnCategory(code || "")));
+          }
+        } catch {
+          // 마커 렌더 갱신 실패 — 캐시는 이미 채워졌으므로 다음 폴링의 upsert()가 정상 색상으로 복구
         }
         await new Promise((res) => setTimeout(res, CONFIG.adsb.routeCodeBatchDelayMs));
       }
@@ -393,7 +433,10 @@ export function createAdsbLayer(map, CONFIG) {
         for (const hex of [pair.a.hex, pair.b.hex]) {
           const marker = markersByHex.get(hex);
           const ac = acByHex.get(hex);
-          if (marker && ac) marker.setIcon(iconFor(ac.track, ac.alt_baro === "ground", "cpa"));
+          if (marker && ac) {
+            marker._alertLevel = "cpa";
+            marker.setIcon(iconFor(ac.track, ac.alt_baro === "ground", "cpa", icnCategory(marker._callsign ? routeCodes.get(marker._callsign) : null)));
+          }
         }
       });
     });
@@ -406,7 +449,10 @@ export function createAdsbLayer(map, CONFIG) {
     for (const [hex, marker] of markersByHex) {
       const ac = acByHex.get(hex);
       if (!ac) continue;
-      marker.setIcon(iconFor(ac.track, ac.alt_baro === "ground", levelByHex.get(hex)));
+      const level = levelByHex.get(hex);
+      marker._alertLevel = level;
+      const category = icnCategory(marker._callsign ? routeCodes.get(marker._callsign) : null);
+      marker.setIcon(iconFor(ac.track, ac.alt_baro === "ground", level, category));
     }
     renderAlertPanel();
   }
@@ -520,20 +566,23 @@ export function createAdsbLayer(map, CONFIG) {
     if (ac.lat == null || ac.lon == null) return;
     const callsign = ac.flight?.trim() || "";
     const isGround = ac.alt_baro === "ground";
+    const category = icnCategory(callsign ? routeCodes.get(callsign) : null);
     const labelHtml = buildLabelHtml(callsign || ac.hex, callsign || null);
     acByHex.set(ac.hex, ac);
     let marker = markersByHex.get(ac.hex);
     if (!marker) {
-      marker = L.marker([ac.lat, ac.lon], { icon: iconFor(ac.track, isGround, alertLevel) });
+      marker = L.marker([ac.lat, ac.lon], { icon: iconFor(ac.track, isGround, alertLevel, category) });
       marker._callsign = callsign;
+      marker._alertLevel = alertLevel;
       marker.bindTooltip(labelHtml, { permanent: true, direction: "right", className: "aircraft-label", offset: [8, 0] });
       marker.on("click", () => showAircraftDetail(marker, ac));
       marker.addTo(group);
       markersByHex.set(ac.hex, marker);
     } else {
       marker.setLatLng([ac.lat, ac.lon]);
-      marker.setIcon(iconFor(ac.track, isGround, alertLevel));
+      marker.setIcon(iconFor(ac.track, isGround, alertLevel, category));
       marker._callsign = callsign;
+      marker._alertLevel = alertLevel;
       marker.setTooltipContent(labelHtml);
     }
   }

@@ -25,6 +25,31 @@ function haversineNm(lat1, lon1, lat2, lon2) {
   return 2 * EARTH_RADIUS_NM * Math.asin(Math.sqrt(a));
 }
 
+function cumulativeDistancesNm(coords) {
+  const cum = [0];
+  for (let i = 1; i < coords.length; i++) {
+    cum.push(cum[i - 1] + haversineNm(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1]));
+  }
+  return cum;
+}
+
+// 30/60/90분... 경과 시점의 예상 위치(사용자 요청, 2026-07-24) — 등속(총소요시간 대비
+// 누적거리 비례) 가정의 단순 버전으로, 사용자 확인 후 이렇게 먼저 진행하기로 확정.
+// 실제로는 이착륙 전후 상승/강하 구간이 순항보다 느려 오차가 있을 수 있어(등속 가정의
+// 한계), 라벨에 "(추정)"을 명시해 실제 위치처럼 보이지 않게 한다(허위 정보 생성 금지 원칙).
+function pointAtElapsedMin(coords, cumDist, totalMin, elapsedMin) {
+  const totalNm = cumDist[cumDist.length - 1];
+  const targetNm = (elapsedMin / totalMin) * totalNm;
+  let i = 0;
+  while (i < cumDist.length - 1 && cumDist[i + 1] < targetNm) i++;
+  const segStartNm = cumDist[i];
+  const segEndNm = cumDist[Math.min(i + 1, cumDist.length - 1)];
+  const frac = segEndNm > segStartNm ? (targetNm - segStartNm) / (segEndNm - segStartNm) : 0;
+  const [la1, lo1] = coords[i];
+  const [la2, lo2] = coords[Math.min(i + 1, coords.length - 1)];
+  return [la1 + (la2 - la1) * frac, lo1 + (lo2 - lo1) * frac];
+}
+
 function isNearBaseline(point, baselineCoords, thresholdNm) {
   for (const [la, lo] of baselineCoords) {
     if (haversineNm(point[0], point[1], la, lo) <= thresholdNm) return true;
@@ -196,6 +221,47 @@ export function createRouteLayers(map, CONFIG) {
     }
   }
 
+  // 등속 가정 보간이라 좌표 간격이 너무 성기면(장거리 구간) 오차가 커진다 — coords 자체는
+  // 이미 레이더 트랙 표본이라 대개 충분히 촘촘하므로 추가 표본화는 하지 않는다(단순 버전).
+  //
+  // coords[0]=출발/coords[last]=도착·avgMin=총소요시간이라는 전제는 store.js의
+  // selectOd()가 ensureAirportsLoaded()를 od:selected 통지 전에 await하는 순서에
+  // 암묵적으로 의존한다(리뷰 지적, 2026-07-24) — 이 순서가 깨지면 coordsWithAirports가
+  // 공항 좌표 대신 레이더 최초 포착 지점(이착륙 도중일 수 있음)을 t=0 기준으로 써 "N분
+  // 후" 라벨이 실제와 다른 지점을 가리키게 된다. 현재 흐름에서는 재현 안 됨(추적 확인),
+  // 향후 store.js 리팩터 시 이 가정이 깨지지 않는지 함께 확인할 것.
+  const MAX_TIME_MARKERS = 50; // 설정값 오기입(예: stepMin이 지나치게 작음)으로 마커가
+  // 과도하게 생성되는 것 방지(리뷰 지적, 2026-07-24) — 장거리 노선이라도 이 이상은 라벨이
+  // 겹쳐 어차피 못 읽으므로 상한을 둔다.
+  function renderTimeMarkers(opt, coords) {
+    const totalMin = Number(opt.avgMin);
+    const stepMin = Number(CONFIG.display.routeTimeMarkerStepMin);
+    // Infinity는 `> 0`을 통과하므로(리뷰 지적, 2026-07-24 — 브라우저 행 유발 가능한
+    // 무한루프) Number.isFinite로 명시적으로 걸러낸다.
+    if (!Number.isFinite(totalMin) || totalMin <= 0 || !Number.isFinite(stepMin) || stepMin <= 0 || coords.length < 2) {
+      return;
+    }
+    const cumDist = cumulativeDistancesNm(coords);
+    let count = 0;
+    for (let t = stepMin; t < totalMin && count < MAX_TIME_MARKERS; t += stepMin, count++) {
+      const [lat, lon] = pointAtElapsedMin(coords, cumDist, totalMin, t);
+      L.circleMarker([lat, lon], {
+        radius: 5,
+        color: CONFIG.tokens.ink,
+        weight: 1.5,
+        fillColor: CONFIG.tokens.paper,
+        fillOpacity: 1,
+      })
+        .bindTooltip(`${t}분 후(추정)`, {
+          permanent: true,
+          direction: "top",
+          offset: [0, -6],
+          className: "route-time-marker-label",
+        })
+        .addTo(group);
+    }
+  }
+
   /** routeResult 전체를 selectedIndex(없으면 전체 겹쳐보기)에 맞춰 다시 그린다.
    * airportByIcao가 있으면 실제 공항 좌표까지 선을 이어 붙인다(위 coordsWithAirports). */
   function render(routeResult, selectedIndex, firByIcao, airportByIcao) {
@@ -215,6 +281,7 @@ export function createRouteLayers(map, CONFIG) {
     );
     highlightFirs(selected.enrouteFirs, firByIcao);
     addEndpointBadges(selected, routeResult, airportByIcao);
+    renderTimeMarkers(selected, coordsWithAirports(selected, routeResult, airportByIcao));
     return L.latLngBounds(coordsWithAirports(selected, routeResult, airportByIcao));
   }
 

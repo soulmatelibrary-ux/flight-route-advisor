@@ -135,7 +135,7 @@ async def _handle_upload(request: Request, background_tasks: BackgroundTasks, fo
             raise HTTPException(409, "동일 재시도 키로 처리 중인 요청과 충돌함, 잠시 후 다시 시도") from None
 
         try:
-            load_raw(engine, descriptor, run_id, uploaded_files, meta=meta)
+            load_raw(engine, descriptor, run_id, uploaded_files)
         except LoaderError as exc:
             finish_run(engine, run_id, "FAILED", error_code="RAW_LOAD_ERROR", error_message=str(exc))
             raise HTTPException(400, f"원본 적재 실패: {exc}") from exc

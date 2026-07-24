@@ -1,10 +1,11 @@
 """CSV/원본 파일 → DB 적재 (Phase 4 raw, Phase 5 processed).
 
 `column_map.py`(단일 출처)를 그대로 따라 DataFrame 컬럼을 물리 컬럼으로 매핑한다. raw
-계층은 "계약 컬럼(TEXT) + 여분 컬럼(JSONB)" 하이브리드(DB스키마.md §1) — 계약에 없는
-나머지 컬럼은 모두 `extra_columns`로 흡수해, 원본 실제 헤더가 문서 요약과 달라도(실측으로
-여러 건 확인됨) 데이터 손실이 없다. raw 적재와 processed 적재는 별도 트랜잭션이다(§8-3) —
-단, 한 run이 다루는 여러 파일/출력은 각각 하나의 트랜잭션으로 묶어 부분 커밋을 막는다.
+계층은 파일 메타(`raw_files`: 원본 파일명·저장 경로·sha256·행수)만 적재한다 — 원본
+행 단위 복제 테이블(raw_*_rows)은 2026-07-24 폐지됐다(원본 파일 자체가 이미
+`stored_relpath`로 보존되고 있어 순수 중복이었음, models.py 참고). raw 적재와 processed
+적재는 별도 트랜잭션이다(§8-3) — 단, 한 run이 다루는 여러 파일/출력은 각각 하나의
+트랜잭션으로 묶어 부분 커밋을 막는다.
 """
 
 from __future__ import annotations
@@ -25,18 +26,15 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
-from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS
+from app.db.column_map import PROCESSED_COLUMNS
 from app.db.models import (
     PROCESSED_TABLES,
-    RAW_ROW_TABLES,
     ingestion_logs,
     ingestion_run_files,
     ingestion_runs,
     raw_files,
 )
 from app.ingestion.constants import (
-    ACDM_DATE_SUFFIX_RE,
-    DATE_YYYYMMDD_RE,
     FLOW_MANAGEMENT_HEADER_SCAN_ROWS,
     FLOW_MANAGEMENT_HEADER_TOKENS,
     FOIS_SOURCE_COLUMNS,
@@ -157,14 +155,12 @@ def load_raw(
     descriptor: SkillDescriptor,
     run_id: uuid.UUID,
     uploaded_files: list[UploadedFile],
-    meta: dict[str, str] | None = None,
 ) -> dict[str, int]:
-    """업로드 원본 파일을 raw_files + raw_*_rows에 적재한다. 반환: 파일명별 적재 행수.
+    """업로드 원본 파일을 raw_files(파일 메타)에 적재한다. 반환: 파일명별 원본 행수.
 
     파일 하나하나가 아니라 이 run이 다루는 모든 파일을 하나의 트랜잭션으로 묶는다 — 중간
     파일에서 실패하면 이전 파일의 부분 적재도 함께 롤백된다.
     """
-    meta = meta or {}
     loaded: dict[str, int] = {}
     with engine.begin() as conn:
         for uploaded in uploaded_files:
@@ -204,9 +200,6 @@ def load_raw(
                 insert(ingestion_run_files),
                 [{"run_id": run_id, "raw_file_id": raw_file_id, "role": "input"}],
             )
-            records = _build_raw_records(descriptor, slot, df, raw_file_id, run_id, uploaded, meta)
-            if records:
-                conn.execute(insert(RAW_ROW_TABLES[slot.raw_table]), records)
 
             loaded[uploaded.original_filename] = len(df)
     return loaded
@@ -369,82 +362,6 @@ def _read_flow_management_raw_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, header=header_row, encoding=encoding, **_READ_CSV_KW)
 
 
-def _build_raw_records(
-    descriptor: SkillDescriptor,
-    slot: UploadSlot,
-    df: pd.DataFrame,
-    raw_file_id: uuid.UUID,
-    run_id: uuid.UUID,
-    uploaded: UploadedFile,
-    meta: dict[str, str],
-) -> list[dict[str, Any]]:
-    if descriptor.run_type == "acdm":
-        return _build_acdm_raw_records(df, raw_file_id, run_id, uploaded, meta)
-
-    contract_pairs = RAW_TABLE_COLUMNS[slot.raw_table]
-    logical_to_physical = dict(contract_pairs)
-    contract_logicals = set(logical_to_physical)
-
-    records = []
-    for row_number, row in enumerate(df.to_dict(orient="records")):
-        mapped: dict[str, Any] = {physical: None for _, physical in contract_pairs}
-        extra: dict[str, Any] = {}
-        for column, value in row.items():
-            if column in contract_logicals:
-                mapped[logical_to_physical[column]] = _json_safe(value)
-            else:
-                extra[str(column)] = _json_safe(value)
-        records.append(
-            {
-                "raw_file_id": raw_file_id,
-                "run_id": run_id,
-                "source_row_number": row_number,
-                "extra_columns": extra,
-                **mapped,
-            }
-        )
-    return records
-
-
-def _build_acdm_raw_records(
-    df: pd.DataFrame, raw_file_id: uuid.UUID, run_id: uuid.UUID, uploaded: UploadedFile, meta: dict[str, str]
-) -> list[dict[str, Any]]:
-    # ACDM은 공항마다 원본 컬럼명이 달라 raw 단계에서 완전한 원본 충실도를 추구하지 않는다
-    # (DB스키마.md §3.2) — source_file/source_date만 타입 컬럼으로 두고 나머지는 전부
-    # extra_columns로 흡수한다. flight_no/reg_no 컬럼은 공항별 원본 헤더가 제각각이라 이번
-    # 라운드는 채우지 않는다(향후 공항별 별칭 매핑이 필요하면 여기서 값만 채우면 되고
-    # DB 스키마 변경은 불필요 — column_map.py에 이미 typed 컬럼으로 정의돼 있다).
-    source_date = _acdm_source_date(uploaded, meta)
-    records = []
-    for row_number, row in enumerate(df.to_dict(orient="records")):
-        extra = {str(column): _json_safe(value) for column, value in row.items()}
-        records.append(
-            {
-                "raw_file_id": raw_file_id,
-                "run_id": run_id,
-                "source_row_number": row_number,
-                "source_file": uploaded.original_filename,
-                "source_date": source_date,
-                "flight_no": None,
-                "reg_no": None,
-                "extra_columns": extra,
-            }
-        )
-    return records
-
-
-def _acdm_source_date(uploaded: UploadedFile, meta: dict[str, str]) -> str | None:
-    stem = Path(uploaded.original_filename).stem
-    match = ACDM_DATE_SUFFIX_RE.search(stem)
-    if match:
-        return match.group(1)
-    # workspace_builder._file_date와 동일한 우선순위: 파일별 재정의 -> 전역 meta.
-    candidate = uploaded.date or meta.get("date")
-    if candidate and DATE_YYYYMMDD_RE.match(candidate):
-        return candidate
-    return None
-
-
 def _json_safe(value: Any) -> Any:
     if value is None:
         return None
@@ -491,7 +408,7 @@ _DELETABLE_STATUSES = ("SUCCESS", "VALIDATION_FAILED", "FAILED")
 
 
 def delete_run(engine: Engine, run_id: uuid.UUID, deleted_by: str) -> dict[str, int]:
-    """이 run이 적재한 raw_*_rows/processed_*/아카이브 파일을 지우고 run을 'DELETED'로
+    """이 run이 적재한 processed_*/아카이브 파일을 지우고 run을 'DELETED'로
     표시한다(감사 기록으로 남김 — ingestion_runs/ingestion_logs/raw_files 메타데이터 행
     자체는 지우지 않는다, run 물리 삭제 아님). 반환: 테이블별 삭제 행수.
 
@@ -522,7 +439,7 @@ def delete_run(engine: Engine, run_id: uuid.UUID, deleted_by: str) -> dict[str, 
         ).all()
 
         deleted: dict[str, int] = {}
-        for table_name, table in {**RAW_ROW_TABLES, **PROCESSED_TABLES}.items():
+        for table_name, table in PROCESSED_TABLES.items():
             result = conn.execute(delete(table).where(table.c.run_id == run_id))
             if result.rowcount:
                 deleted[table_name] = result.rowcount

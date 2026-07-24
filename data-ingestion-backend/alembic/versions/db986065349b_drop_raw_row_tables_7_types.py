@@ -1,35 +1,38 @@
-"""raw row tables 7 types
+"""drop raw row tables 7 types
 
-근거: data-ingestion-backend/docs/DB스키마.md §3.2.
+근거: 사용자 요청 — raw_*_rows 7종(68b1cff4780c)은 업로드 원본 파일을 행 단위로 그대로
+DB에 복제한 것인데, 원본 파일 자체가 이미 `raw_files.stored_relpath`로 디스크에 보존되고
+있어(+ sha256 무결성 검증) 순수 중복이었다. 로컬 DB 실측 기준 245MB(전체 DB의 절반 이상)를
+차지해 Supabase 이전 시 용량 부담이 가장 컸다(docs/02-db-integration.md §1, §6).
 
-2026-07-24 갱신: 이 리비전이 만드는 7개 테이블은 이후 리비전(raw_row_tables_drop)에서
-폐지됐다(원본 파일이 이미 raw_files.stored_relpath로 보존되어 행 단위 DB 복제가
-순수 중복이었음, docs/02-db-integration.md §1). 원래 이 파일은 app.db.column_map의
-RAW_TABLE_COLUMNS를 단일 출처로 참조했으나, 그 상수가 폐지 시 함께 제거되어 이 리비전이
-깨지지 않도록(신규 DB에 처음부터 마이그레이션을 재생할 때 반드시 필요) 컬럼 목록을
-그 시점의 값 그대로 이 파일에 스냅샷으로 옮겨 자기완결적으로 만들었다 — 이후 리비전이
-어차피 이 테이블들을 지우므로 스냅샷 정확성보다 "당시 실제로 생성됐던 스키마"를 그대로
-재현하는 것이 목적이다.
+이 테이블들을 참조하는 다른 테이블은 없다(raw_*_rows.id를 FK로 참조하는 테이블 없음,
+실측 확인) — drop 순서는 문제되지 않는다. raw_files/ingestion_run_files/ingestion_runs는
+그대로 유지되어 "어떤 파일이 언제·어떤 run으로 적재됐는지"는 계속 추적 가능하다.
 
-Revision ID: 68b1cff4780c
-Revises: 82f408ef63f3
-Create Date: 2026-07-21 19:36:24.674337
+애플리케이션 코드(app/db/models.py의 RAW_ROW_TABLES, app/db/column_map.py의
+RAW_TABLE_COLUMNS, app/ingestion/loaders.py의 raw_*_rows 적재 로직, 원본 행 단위
+브라우징 UI(/tables, /runs/{id}/data/{table}))는 이 리비전과 별개로 이미 제거됨.
+
+Revision ID: db986065349b
+Revises: d9f2b4a8c1e6
+Create Date: 2026-07-24 13:40:23.336123
 
 """
 from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+
 # revision identifiers, used by Alembic.
-revision: str = '68b1cff4780c'
-down_revision: Union[str, None] = '82f408ef63f3'
+revision: str = 'db986065349b'
+down_revision: Union[str, None] = 'd9f2b4a8c1e6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# 2026-07-24 폐지 시점의 app.db.column_map.RAW_TABLE_COLUMNS 스냅샷(더 이상 앱 코드에는
-# 없음 — 이 리비전을 자기완결적으로 재생하기 위해서만 보존).
+# 68b1cff4780c의 스냅샷과 동일 — downgrade에서 원래 스키마 그대로 복원하기 위함
+# (데이터 자체는 drop과 함께 사라지며 복원되지 않는다, 구조만 복원).
 _RAW_TABLE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
     "raw_flight_analysis_rows": (
         ("DATE", "date"), ("CALLSIGN", "callsign"), ("SSR", "ssr"), ("DEPT", "dept"),
@@ -80,7 +83,12 @@ _RAW_TABLE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
 
 
 def upgrade() -> None:
-    for table_name, pairs in _RAW_TABLE_COLUMNS.items():
+    for table_name in _RAW_TABLE_COLUMNS:
+        op.drop_table(table_name)
+
+
+def downgrade() -> None:
+    for table_name, pairs in reversed(list(_RAW_TABLE_COLUMNS.items())):
         op.create_table(
             table_name,
             sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
@@ -112,8 +120,3 @@ def upgrade() -> None:
             ),
         )
         op.create_index(f"ix_{table_name}_run_id", table_name, ["run_id"])
-
-
-def downgrade() -> None:
-    for table_name in reversed(list(_RAW_TABLE_COLUMNS)):
-        op.drop_table(table_name)

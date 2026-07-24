@@ -6,6 +6,11 @@
  * 실측 확인(2026-07-23, WebFetch/curl 직접): `api.rainviewer.com/public/weather-maps.json`
  * → `radar.past`(과거 2시간, ~10분 간격 프레임) + `tilecache.rainviewer.com` 둘 다
  * `Access-Control-Allow-Origin: *` — 프록시 불필요, `fetch()` 직접 호출.
+ *
+ * 체크박스로 켜면(overlayadd) 프레임 로드 직후 자동으로 무한재생 시작(사용자 요청,
+ * 2026-07-24) — 이전엔 로드만 하고 사용자가 재생 버튼을 눌러야 움직였다. 껐다 켤 때도
+ * resetFrames()가 playTimer를 정지시켜 두므로(overlayremove→pause) 매번 재생 안 된
+ * 상태에서 시작해 정상적으로 play()가 토글이 아니라 "시작"으로 동작한다.
  */
 const L = window.L;
 
@@ -109,6 +114,7 @@ export function createRadarLayer(map, CONFIG) {
     try {
       await ensureLoaded();
       if (sliderEl) sliderEl.disabled = false;
+      play(); // 체크 즉시 무한재생(사용자 요청, 2026-07-24) — 이전엔 재생 버튼을 눌러야 시작했음
     } catch {
       // 프레임 메타 조회 실패 — 재생바는 그대로 보이되 실패 상태를 명시(리뷰 지적사항,
       // 2026-07-23: 이전엔 무반응 컨트롤만 남아 사용자가 고장인지 구분할 수 없었음)

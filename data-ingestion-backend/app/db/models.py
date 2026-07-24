@@ -1,8 +1,13 @@
-"""SQLAlchemy Core Table 정의 (전체 13종).
+"""SQLAlchemy Core Table 정의 (전체 10종).
 
 물리 컬럼명은 `column_map.py`(단일 출처)를 그대로 따른다. 여기서 컬럼명 문자열을
 다시 나열하지 않고 `column_map`의 매핑을 순회해 생성한다(DB스키마.md §9 규칙).
 CHECK 제약·인덱스·FK는 DB스키마.md 2~6·8장 그대로.
+
+raw_*_rows 7종(원본 행 단위 복제 테이블)은 2026-07-24 폐지됐다 — 원본 파일 자체가
+이미 `raw_files.stored_relpath`로 보존되고 있어(+ sha256 무결성 검증) 행 단위 DB
+복제는 245MB(전체 DB의 절반 이상)를 차지하는 순수 중복이었다. 추적성은
+`raw_files`(파일 메타)만으로 유지된다. 상세: docs/02-db-integration.md §1.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 
-from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS
+from app.db.column_map import PROCESSED_COLUMNS
 
 metadata = sa.MetaData()
 
@@ -132,30 +137,6 @@ ingestion_logs = sa.Table(
     ),
 )
 sa.Index("ix_ingestion_logs_run_id", ingestion_logs.c.run_id)
-
-# --- 3. Raw 계층 — 파일유형별 raw_*_rows 7종 (DB스키마.md §3.2) ---
-
-RAW_ROW_TABLES: dict[str, sa.Table] = {}
-for _name, _pairs in RAW_TABLE_COLUMNS.items():
-    _table = sa.Table(
-        _name,
-        metadata,
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
-        sa.Column(
-            "raw_file_id", PgUUID(as_uuid=True), sa.ForeignKey("raw_files.id"), nullable=False
-        ),
-        sa.Column(
-            "run_id", PgUUID(as_uuid=True), sa.ForeignKey("ingestion_runs.id"), nullable=False
-        ),
-        sa.Column("source_row_number", sa.Integer, nullable=False),
-        *_text_columns(_pairs),
-        sa.Column("extra_columns", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column(
-            "ingested_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.func.now()
-        ),
-    )
-    sa.Index(f"ix_{_name}_run_id", _table.c.run_id)
-    RAW_ROW_TABLES[_name] = _table
 
 # --- 4. Processed 계층 — processed_* 6종 (DB스키마.md §4·§9) ---
 

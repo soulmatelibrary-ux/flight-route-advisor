@@ -148,7 +148,15 @@ SELECT * FROM ranked WHERE rn = 1;
 
 > **env 변수명(확정, 2026-07-22)**: `ADVISOR_DATABASE_URL`(이 서비스, `advisor_readonly` role)과 data-ingestion-backend의 `DATABASE_URL`(쓰기 role)은 **서로 다른 값이어야 한다**. 같은 값을 공유하면 Stage 0가 재적재를 위해 쓰기 계정을 쓰는 동안 이 서비스도 같은 쓰기 권한을 갖게 되어 최소권한 원칙(§1.2, [06 §3](./06-conventions.md))이 무너진다. `backend/app/config.py`가 `ADVISOR_DATABASE_URL`을 읽는다.
 
-> **Supabase 프로젝트 준비됨(2026-07-22, 미사용 — 기록만)**: 실제 프로젝트 "flight-route-advisor"(`https://aouaqoimieabflyqopvx.supabase.co`) 생성 완료. **Direct connection(IPv6 전용)은 접속 확인 실패**(IPv6 라우팅 안 되는 환경에서 `getaddrinfo` 실패) — **Session pooler(IPv4)로 접속 성공 확인**(`PostgreSQL 17.6`, `aws-0-ap-southeast-1.pooler.supabase.com:5432`, user는 `postgres.<project-ref>` 형식). 저장소 루트 `.env`에 `SUPABASE_PROJECT_URL`/`SUPABASE_PUBLISHABLE_KEY`/`SUPABASE_DB_PASSWORD`/`SUPABASE_POOLER_DATABASE_URL` 4개 값 이미 준비됨(어떤 코드도 아직 참조하지 않음) — 실제 전환 시 이 값을 `session.py`가 읽을 `ADVISOR_DATABASE_URL`/`DATABASE_URL`로 그대로 옮기면 된다. **이후 전환 시 direct connection 대신 pooler를 기본으로 쓸 것**(위 표의 "pooler 권장" 방침과도 일치).
+> **Supabase 프로젝트 준비됨(2026-07-22, 당시 미사용 — 기록만)**: 실제 프로젝트 "flight-route-advisor"(`https://aouaqoimieabflyqopvx.supabase.co`) 생성 완료. **Direct connection(IPv6 전용)은 접속 확인 실패**(IPv6 라우팅 안 되는 환경에서 `getaddrinfo` 실패) — **Session pooler(IPv4)로 접속 성공 확인**(`PostgreSQL 17.6`, `aws-0-ap-southeast-1.pooler.supabase.com:5432`, user는 `postgres.<project-ref>` 형식). 저장소 루트 `.env`에 `SUPABASE_PROJECT_URL`/`SUPABASE_PUBLISHABLE_KEY`/`SUPABASE_DB_PASSWORD`/`SUPABASE_POOLER_DATABASE_URL` 4개 값 이미 준비됨. **이후 전환 시 direct connection 대신 pooler를 기본으로 쓸 것**(위 표의 "pooler 권장" 방침과도 일치).
+
+> **스키마·데이터 마이그레이션 완료(2026-07-24, 아직 미전환)**: 위 준비된 Supabase 프로젝트에 실제로 스키마+데이터를 이관하고 전량 검증했다. **컷오버(`ADVISOR_DATABASE_URL`/`DATABASE_URL`을 Supabase로 교체해 실제 트래픽 전환)는 아직 하지 않음** — 검증까지만 완료된 상태.
+> - **스키마**: `alembic upgrade head`를 `DATABASE_URL=$SUPABASE_POOLER_DATABASE_URL`로 재정의해 전체 마이그레이션 체인(38개 테이블 + `advisor_readonly`/`advisor_artifact_writer` role·GRANT)을 처음부터 재생. 이 과정에서 **기존 버그 발견·수정**: `aee66ded869a`(reference tables 리비전)가 그 시점 스냅샷이 아니라 계속 자라온 `app.db.reference_tables.REFERENCE_TABLES`(현재 13개)를 그대로 참조하고 있어, 로컬처럼 점진적 이력에서는 안 드러나다가 신규 DB 전체 재생 시 이후 리비전(`b7d3f9a1c8e4`·`f1a4c6b9d2e8`)이 만드는 테이블을 먼저 만들어버려 "relation already exists"로 실패했다. 이 리비전이 담당하는 10개 테이블을 이름으로 고정해 수정(로컬 DB는 이미 적용된 리비전이라 영향 없음, 향후 신규 설치에만 해당).
+> - **데이터**: `pg_dump --data-only`(로컬) → `pg_restore --data-only`(Supabase)로 이관. **38개 테이블 전부 로컬↔Supabase 행수 일치, 시퀀스 21개 전부 일치, `advisor_readonly`(33건)·`advisor_artifact_writer`(70건) GRANT 완전 일치, `ingestion_runs` 컬럼 단위 GRANT 일치, RLS 전 테이블 비활성 확인**(restore 시 `--disable-triggers` 미사용 — FK 제약이 그대로 걸린 채 통과해 참조 무결성도 보증됨). Supabase DB 크기 203MB(로컬 220MB, raw_*_rows 제거 후 기준) — 무료 티어 500MB 한도에 여유.
+> - **남은 이슈(해결 안 됨, 기능 차단 아님)**:
+>   1. `data-ingestion-backend/app/db/session.py`가 `sslmode`를 명시 설정하지 않음(`backend/app/db/session.py`는 `DB_SSL_MODE`를 씀 — 두 세션 모듈 불일치). 현재는 psycopg2 기본값 `prefer`로 접속되나, 위 표의 "Supabase=`sslmode=require` 강제" 방침이 실제로는 적용 안 된 상태.
+>   2. `advisor_readonly`/`advisor_artifact_writer` 비밀번호가 로컬과 Supabase에 동일하게 적용됨(같은 `.env` 값 재사용) — 한쪽 자격증명 유출 시 다른 쪽도 동시에 노출.
+>   3. 이번에 새로 쓰거나 고친 리비전(`db986065349b`·수정된 `aee66ded869a`·`68b1cff4780c`)의 `downgrade()`는 upgrade 경로만 검증했고 실제 실행한 적은 없음.
 
 - 연결 로직은 `session.py` 한 곳에 캡슐화해 로컬↔Supabase 전환이 환경변수만으로 되게 한다(전처리 백엔드와 동일 관례).
 - 이 서비스는 마이그레이션을 실행하지 않는다(Alembic은 전처리 백엔드 소유).
@@ -181,7 +189,8 @@ SELECT * FROM ranked WHERE rn = 1;
 
 - **신선도**: 참조 지오메트리는 월·분기 단위, 운항 데이터는 새 업로드(run) 단위로 갱신된다. 경로추천 배치는 새 SUCCESS run 이후 재생성.
 - **검증 제외 행 노출**: `ingestion_runs.validation_summary`의 제외 건수(예 ACDM `검토필요`)를 API 메타로 전달해 프론트에서 신뢰도 경고를 띄울 수 있게 한다.
-- **역추적**: 필요 시 `run_id`로 `ingestion_runs`→`raw_*`까지 추적 가능(전처리 `DB스키마.md` 5장). 이 서비스는 읽기만 하지만, 특정 통계의 출처 run을 응답에 포함해 감사성을 높인다.
+- **역추적**: 필요 시 `run_id`로 `ingestion_runs`→`ingestion_run_files`→`raw_files`(원본 파일명·저장 경로·sha256)까지 추적 가능. 이 서비스는 읽기만 하지만, 특정 통계의 출처 run을 응답에 포함해 감사성을 높인다.
+  > **2026-07-24 갱신**: 원본 행 단위 복제 테이블 `raw_*_rows` 7종은 폐지됐다(원본 파일 자체가 이미 `raw_files.stored_relpath`로 보존되고 있어 245MB — 로컬 DB의 절반 이상 — 를 차지하는 순수 중복이었음, Supabase 이전 용량 검토 중 발견). 역추적은 이제 파일 단위(원본 파일명·경로·sha256)까지만 가능하고, 행 단위 재현이 필요하면 `raw_files.stored_relpath`의 원본 파일을 직접 열어야 한다. 상세: `data-ingestion-backend/alembic/versions/db986065349b_*`.
 
 ## 8. 열린 이슈 (개발 착수 전 확정 필요)
 1. ~~물리 컬럼 별칭~~ → **확정됨**([DB스키마 §9](../data-ingestion-backend/docs/DB스키마.md), §5 반영 완료). 헤더 변경 시에만 재동기화.

@@ -45,10 +45,11 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
   // 이 그룹들을 무조건 다시 addLayer해 체크박스로 꺼둔 상태가 도로 켜지는 회귀가 있었다
   // (리뷰 지적 — 처음엔 TCA만 개별 방어했으나 나머지도 동일 문제라 일반화). 이 맵을 그룹
   // on/off의 단일 출처로 두고, showFocus/showBulk/부팅 시 초기화 모두 이걸 참조한다.
-  // 기본값(true 3개+false tca)은 기존 부팅 동작과 동일 — main.js가 하던 개별 addTo 루프를
-  // 여기로 옮겼다.
+  // main.js가 하던 개별 addTo 루프를 여기로 옮겼다.
   const enabledByName = {
-    firs: true, tca: false, airways: true, waypoints: true, navaids: true,
+    // 기본 체크 상태는 사용자 확정(스크린샷 기준, 2026-07-24): FIR·항공로만 켜고
+    // 픽스·항행시설은 끔(TCA와 함께 보조 참조 레이어로 필요할 때만 켜는 구성).
+    firs: true, tca: false, airways: true, waypoints: false, navaids: false,
     // SUAS/MOA(특수공역, 2026-07-24 신규) — tca와 동일하게 기본 꺼짐(보조 참조 레이어).
     suasKr: false, suasWorld: false,
   };
@@ -189,6 +190,9 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
         .bindTooltip(`<b>${escapeHtml(wp.ident)}</b><br>${wp.lat.toFixed(4)}, ${wp.lon.toFixed(4)}`, {
           direction: "top",
           offset: [0, -4],
+          // 다크 팝업 테마 전용 클래스(사용자 요청, 2026-07-24) — aircraft-label/
+          // route-time-marker-label은 자체 배경을 이미 지정하므로 영향 없음.
+          className: "ref-tooltip",
         })
         .addTo(groups.waypoints);
     }

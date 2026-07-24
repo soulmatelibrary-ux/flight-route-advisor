@@ -9,7 +9,6 @@ from __future__ import annotations
 import csv
 import hmac
 import io
-import json
 from pathlib import Path
 from typing import Iterator
 from uuid import UUID
@@ -20,10 +19,9 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
-from app.db.column_map import PROCESSED_COLUMNS, RAW_TABLE_COLUMNS, COLUMN_DESCRIPTIONS
+from app.db.column_map import PROCESSED_COLUMNS, COLUMN_DESCRIPTIONS
 from app.db.models import (
     PROCESSED_TABLES,
-    RAW_ROW_TABLES,
     ingestion_logs,
     ingestion_run_files,
     ingestion_runs,
@@ -46,18 +44,19 @@ _DATA_PAGE_SIZE_MAX = 200
 _CSV_EXPORT_CHUNK_SIZE = 5000
 
 
-def _tables_for_run_type(run_type: str) -> dict[str, bool]:
-    """이 run_type이 실제로 쓰는 테이블명만 화이트리스트로 반환한다(값: raw 테이블 여부).
+def _tables_for_run_type(run_type: str) -> tuple[str, ...]:
+    """이 run_type이 실제로 쓰는 processed_* 테이블명만 화이트리스트로 반환한다.
 
     /runs/{id}/data/{table_name}이 임의 테이블명을 받아 그대로 조회하면 이 앱이 아는 모든
     테이블(다른 run_type 것 포함)을 조회할 수 있게 되므로, run_type의 SkillDescriptor가
     선언한 테이블로만 제한한다(경로주입은 아니지만 동일한 "신뢰 못 할 입력으로 임의 리소스
     접근" 부류라 화이트리스트로 막는다, docs/06-conventions.md §8).
+
+    raw_*_rows 7종은 2026-07-24 폐지되어 더 이상 화이트리스트에 없다 — 원본 확인은
+    입력 파일 목록(raw_files 메타)으로 한다.
     """
     descriptor = get_descriptor(run_type)
-    tables: dict[str, bool] = {name: True for name in descriptor.raw_tables}
-    tables.update({output.table: False for output in descriptor.outputs})
-    return tables
+    return tuple(output.table for output in descriptor.outputs)
 
 
 @router.get("/runs", response_class=HTMLResponse)
@@ -105,7 +104,7 @@ def run_detail(request: Request, run_id: UUID) -> HTMLResponse:
 
 def _resolve_run_table(engine, run_id: UUID, table_name: str):
     """run_id가 실제로 존재하고, table_name이 그 run_type이 쓰는 테이블(화이트리스트)인지
-    확인한 뒤 (table, pairs, is_raw)를 반환한다. run_data/download_data_csv가 공유한다.
+    확인한 뒤 (table, pairs)를 반환한다. run_data/download_data_csv가 공유한다.
     """
     with engine.connect() as conn:
         run = conn.execute(
@@ -118,15 +117,12 @@ def _resolve_run_table(engine, run_id: UUID, table_name: str):
     if table_name not in allowed:
         raise HTTPException(404, f"이 run에 속하지 않는 테이블: {table_name!r}")
 
-    is_raw = allowed[table_name]
-    table = RAW_ROW_TABLES[table_name] if is_raw else PROCESSED_TABLES[table_name]
-    pairs = RAW_TABLE_COLUMNS[table_name] if is_raw else PROCESSED_COLUMNS[table_name]
-    return table, pairs, is_raw
+    return PROCESSED_TABLES[table_name], PROCESSED_COLUMNS[table_name]
 
 
 @router.get("/runs/{run_id}/data/{table_name}", response_class=HTMLResponse)
 def run_data(request: Request, run_id: UUID, table_name: str, page: int = 1, page_size: int = _DATA_PAGE_SIZE_DEFAULT) -> HTMLResponse:
-    """이 run이 적재한 raw_*_rows/processed_* 실제 행 데이터를 페이지 단위로 보여준다
+    """이 run이 적재한 processed_* 실제 행 데이터를 페이지 단위로 보여준다
     (DataGrip 등 외부 DB 클라이언트 없이도 적재 결과를 바로 확인할 수 있게).
 
     OFFSET 페이지네이션을 그대로 쓴다 — 화면 탐색은 임의 페이지 번호로 건너뛸 수 있어야
@@ -135,7 +131,7 @@ def run_data(request: Request, run_id: UUID, table_name: str, page: int = 1, pag
     바꿨다(코드리뷰 2026-07-21).
     """
     engine = get_engine()
-    table, pairs, is_raw = _resolve_run_table(engine, run_id, table_name)
+    table, pairs = _resolve_run_table(engine, run_id, table_name)
 
     page = max(page, 1)
     page_size = min(max(page_size, 1), _DATA_PAGE_SIZE_MAX)
@@ -167,7 +163,6 @@ def run_data(request: Request, run_id: UUID, table_name: str, page: int = 1, pag
             "request": request,
             "run_id": run_id,
             "table_name": table_name,
-            "is_raw": is_raw,
             "columns": columns,
             "rows": rows,
             "page": page,
@@ -180,13 +175,13 @@ def run_data(request: Request, run_id: UUID, table_name: str, page: int = 1, pag
 
 @router.get("/runs/{run_id}/data/{table_name}/download.csv")
 def download_data_csv(run_id: UUID, table_name: str) -> StreamingResponse:
-    """이 run이 적재한 raw_*_rows/processed_* 테이블 데이터 전체(페이지 제한 없이)를
+    """이 run이 적재한 processed_* 테이블 데이터 전체(페이지 제한 없이)를
     CSV로 내려받는다. 대량 행도 메모리에 한번에 올리지 않도록 청크 단위로 스트리밍한다.
     """
     engine = get_engine()
-    table, pairs, is_raw = _resolve_run_table(engine, run_id, table_name)
+    table, pairs = _resolve_run_table(engine, run_id, table_name)
 
-    header = (["source_row_number"] if is_raw else []) + [logical for logical, _ in pairs] + (["extra_columns"] if is_raw else [])
+    header = [logical for logical, _ in pairs]
     physical_cols = [physical for _, physical in pairs]
 
     def _rows() -> Iterator[str]:
@@ -216,10 +211,7 @@ def download_data_csv(run_id: UUID, table_name: str) -> StreamingResponse:
                 buf = io.StringIO()
                 writer = csv.writer(buf)
                 for r in chunk:
-                    extra = json.dumps(r["extra_columns"], ensure_ascii=False) if is_raw else None
-                    line = ([r["source_row_number"]] if is_raw else []) + [r[c] for c in physical_cols] + (
-                        [extra] if is_raw else []
-                    )
+                    line = [r[c] for c in physical_cols]
                     writer.writerow(line)
                 yield buf.getvalue()
                 last_id = chunk[-1]["id"]
@@ -263,7 +255,7 @@ def download_artifact(run_id: UUID, artifact: str):
 @router.post("/runs/{run_id}/delete")
 def delete_run_route(run_id: UUID, deleted_by: str = Form(...), admin_token: str = Form(...)):
     """run 삭제(재입력 전 정리) — SUCCESS/VALIDATION_FAILED/FAILED terminal 상태만 가능하다.
-    run 메타데이터·로그는 감사 기록으로 남고, raw_*_rows/processed_*/아카이브 파일만 지운다.
+    run 메타데이터·로그는 감사 기록으로 남고, processed_*/아카이브 파일만 지운다.
 
     이 앱 전체에 인증이 없어(코드리뷰 2026-07-21 발견) 되돌릴 수 없는 삭제만은 별도
     최소 게이트를 둔다 — INGESTION_DELETE_TOKEN이 설정돼 있어야 하고(미설정 시 삭제

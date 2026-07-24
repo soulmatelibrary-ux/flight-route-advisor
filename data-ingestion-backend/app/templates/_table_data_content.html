@@ -22,21 +22,17 @@
 <thead>
 <tr>
 <th>run_id</th>
-{% if is_raw %}<th>#</th>{% endif %}
 {% for c in columns %}<th title="{{ c.description or c.logical }}">{{ c.logical }}</th>{% endfor %}
-{% if is_raw %}<th>여분 컬럼(extra_columns)</th>{% endif %}
 </tr>
 </thead>
 <tbody>
 {% for r in rows %}
 <tr>
   <td><a href="/runs/{{ r.run_id }}">{{ r.run_id }}</a></td>
-  {% if is_raw %}<td>{{ r.source_row_number }}</td>{% endif %}
   {% for c in columns %}<td>{{ r[c.physical] if r[c.physical] is not none else '' }}</td>{% endfor %}
-  {% if is_raw %}<td><pre>{{ r.extra_columns }}</pre></td>{% endif %}
 </tr>
 {% else %}
-<tr><td colspan="{{ columns|length + 3 }}">데이터 없음</td></tr>
+<tr><td colspan="{{ columns|length + 1 }}">데이터 없음</td></tr>
 {% endfor %}
 </tbody>
 </table>
