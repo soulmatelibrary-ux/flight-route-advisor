@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""정적 참조 데이터(사전빌드_JSON 7종) → reference_* DB 테이블 1회 이관.
+"""정적 참조 데이터(사전빌드_JSON 8종) → reference_* DB 테이블 1회 이관.
 
-`PORTING_PACKAGE_ROOT/사전빌드_JSON/{firs,firlbl,tca,airways,airports,navaids,waypoints}.json`을
-읽어 `app.db.reference_tables`(단일 출처) 스키마에 맞춰 truncate-and-reload한다. 원본 JSON은
-읽기 전용으로만 다루고 수정하지 않는다(CLAUDE.md §0.1). 업로드 폼/ingestion_runs 감사 추적을
-거치지 않는다 — 이 7종은 run_id로 버전 구분할 필요가 없는 정적 마스터 데이터이기 때문
-(reference_tables.py 모듈 docstring 참고). 재실행해도 안전(idempotent, DELETE 후 재적재).
+`PORTING_PACKAGE_ROOT/사전빌드_JSON/{firs,firlbl,tca,airways,airports,navaids,waypoints,
+acc_sectors}.json`을 읽어 `app.db.reference_tables`(단일 출처) 스키마에 맞춰
+truncate-and-reload한다. 원본 JSON은 읽기 전용으로만 다루고 수정하지 않는다(CLAUDE.md §0.1).
+업로드 폼/ingestion_runs 감사 추적을 거치지 않는다 — 이 8종은 run_id로 버전 구분할 필요가
+없는 정적 마스터 데이터이기 때문(reference_tables.py 모듈 docstring 참고). 재실행해도
+안전(idempotent, DELETE 후 재적재).
 
 사용법: python scripts/migrate_static_reference_to_db.py
 """
@@ -22,6 +23,8 @@ from sqlalchemy import delete, insert  # noqa: E402
 
 from app.config import settings  # noqa: E402
 from app.db.reference_tables import (  # noqa: E402
+    reference_acc_boundary,
+    reference_acc_sector,
     reference_airport,
     reference_airway,
     reference_fir,
@@ -139,6 +142,34 @@ def _build_waypoint_rows() -> list[dict]:
     ]
 
 
+def _build_acc_sector_rows() -> list[dict]:
+    doc = _load_json("acc_sectors.json")  # {acc:{IN:[flat,...],DG:[flat,...]}, sectors:[[id,name,acc,flat],...]}
+    sectors = doc.get("sectors", [])
+    # seq는 원본 배열 순서를 그대로 보존한다 — analyzeFIR 이식(A4)의 point-in-polygon
+    # 배정이 이 순서대로 첫 매치에서 멈추므로(GH/GL처럼 동일 폴리곤을 공유하는 섹터가
+    # 있어 순서가 배정 결과를 바꾼다), DB 조회 시에도 반드시 이 순서를 복원해야 한다.
+    return [
+        {
+            "sector_id": sector_id,
+            "name_en": name_en,
+            "acc": acc,
+            "seq": i,
+            "polygon": _to_pairs(flat),
+        }
+        for i, (sector_id, name_en, acc, flat) in enumerate(sectors)
+    ]
+
+
+def _build_acc_boundary_rows() -> list[dict]:
+    doc = _load_json("acc_sectors.json")
+    acc_map = doc.get("acc", {})
+    return [
+        {"acc": acc, "polygon": _to_pairs(flat)}
+        for acc, polys in acc_map.items()
+        for flat in polys
+    ]
+
+
 _BUILDERS = (
     (reference_fir, _build_fir_rows),
     (reference_tca, _build_tca_rows),
@@ -146,6 +177,8 @@ _BUILDERS = (
     (reference_airport, _build_airport_rows),
     (reference_navaid, _build_navaid_rows),
     (reference_waypoint, _build_waypoint_rows),
+    (reference_acc_sector, _build_acc_sector_rows),
+    (reference_acc_boundary, _build_acc_boundary_rows),
 )
 
 

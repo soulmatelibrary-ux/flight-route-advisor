@@ -74,6 +74,8 @@ export const api = {
   navaids: ({ bbox } = {}) => getJson("/reference/navaids", { bbox }),
   waypoints: ({ bbox, limit } = {}) => getJson("/reference/waypoints", { bbox, limit }),
   sidstar: ({ airport } = {}) => getJson("/reference/sidstar", { airport }),
+  accSectors: () => getJson("/reference/acc-sectors"),
+  suas: ({ bbox, region } = {}) => getJson("/reference/suas", { bbox, region }),
   foisDelays: ({ direction, airport, dateFrom, dateTo } = {}) =>
     getJson("/fois/delays", { direction, airport, date_from: dateFrom, date_to: dateTo }),
   flowManagement: ({ dateFrom, dateTo, fir, airway, limit, offset } = {}) =>

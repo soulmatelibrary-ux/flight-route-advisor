@@ -151,6 +151,24 @@ export function initRoutePanel() {
         `운항 ${share}% · 지연율 ${ratePct}%(${opt.delayCount}건) · HEAVY ${opt.heavyCount}(${Math.round(heavyRate(opt) * 100)}%) · ` +
         `${escapeHtml(opt.enrouteFirs.join(" → "))}${congestionTag}`;
       li.append(row1, row2);
+      // 터미널 신호(A6, docs/13 STEP A6 — 완성본 odInfo/ext 이식): 진출입 게이트·출발
+      // 활주로 분포. 둘 다 결측(entry_fir/exit_fir 값이 없거나 ACDM 매칭이 안 된
+      // 소수 OD)이면 조용히 생략 — 없는 값을 지어내지 않는다.
+      if (opt.gateIn || opt.gateOut || opt.runwayDist?.length) {
+        const row3 = document.createElement("div");
+        row3.className = "row2";
+        // row3는 textContent만 쓰므로(아래) escapeHtml 불필요(innerHTML이 아님 — wind.js
+        // 리뷰에서 이미 지적된 것과 동일한 이유로 여기선 처음부터 안 넣음).
+        const parts = [];
+        if (opt.gateIn || opt.gateOut) {
+          parts.push(`인천 진출입 : 진입 ${opt.gateIn || "—"} → 진출 ${opt.gateOut || "—"}`);
+        }
+        if (opt.runwayDist?.length) {
+          parts.push(`출발 활주로 ${opt.runwayDist.map(([rw, pct]) => `${rw} ${pct}%`).join(" · ")}`);
+        }
+        row3.textContent = parts.join(" · ");
+        li.append(row3);
+      }
       li.addEventListener("click", () => selectOption(idx));
       listEl.appendChild(li);
     });

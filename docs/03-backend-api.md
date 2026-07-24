@@ -48,13 +48,14 @@
 | `GET /api/reference/acc-sectors` | ACC 관제섹터 | ACCS `{acc:{IN,DG}, sectors:[...]}` | — |
 | `GET /api/reference/firko` | FIR 한국어명 | FIRKO `{ICAO:한글명}` | — |
 | `GET /api/reference/sidstar` | SID/STAR(한국만, Jeppesen 항행DB 이관) | `{proc,name,airport,coords}` (좌표는 fix 해석으로 조립, 원본 CSV엔 좌표 없음) | `airport`(없으면 전체 반환) |
-| `GET /api/reference/suas` | (2단계) 특수사용공역 | SU/SUW | `bbox`,`scope` |
+| `GET /api/reference/suas` | 특수사용공역(SUAS/MOA) | SU/SUW | `bbox`,`region`(`kr`\|`world`) |
 
 - `bbox=minLat,minLon,maxLat,maxLon`, `zoom=<int>` — 서버가 줌별 표시 규칙(원본 `03`)을 적용해 반환량을 줄인다.
 - 응답 형태는 키 기반 객체 배열(예 airways: `{ident, seq, a:[lat,lon], b:[lat,lon], upper, lower}`) — 프론트 어댑터가 04-A 사전투영 입력으로 변환.
 
 > **구현 범위(2026-07-22)**: MVP DoD([05](./05-mvp-scope.md) §2.4 "참조 지도 6종")에 필요한 firs·tca·airways·airports·navaids·waypoints만 우선 구현했다.
-> - `acc-sectors`·`suas`는 FIR 분석 패널·2단계 기능 전용이라 이번 라운드 대상이 아니다.
+> - `acc-sectors`는 [13-ai-reasoning-dev-plan](./13-ai-reasoning-dev-plan.md) STEP A4(실시간 섹터 교통·수요예측) 선행으로 **2026-07-24 구현 완료** — `reference_acc_sector`/`reference_acc_boundary` 2개 테이블(`data-ingestion-backend/scripts/migrate_static_reference_to_db.py`가 `acc_sectors.json`에서 이관), bbox 필터 없이 14개 섹터 전체 반환. 한국(인천/대구 ACC)만 커버하는 원본 데이터 한계 그대로(허위로 다른 지역 섹터를 만들지 않음) — `frontend/js/analyze-sectors.js`가 소비.
+> - `suas`는 2026-07-24 구현 완료(사용자 요청으로 공역 좌표 DB 편입) — `reference_suas`(지오메트리, `ident/name/type/upper/lower/polygon/region`)를 응답한다. **발효시간(A7, [13](./13-ai-reasoning-dev-plan.md) STEP A7, 2026-07-24 구현 완료)**: `eff_times_raw`/`schedule_status`(`structured`\|`confirm_required`\|`null`=배치 미실행)/`schedule_segments`(`structured`일 때만 `[{days,utc_start,utc_end}, ...]`)를 `ident`로 애플리케이션 레벨 조인해 덧붙인다 — DAFIF `SUAS_PAR.TXT`의 `EFF_TIMES`는 완성본조차 버린 필드라 `backend/batch/build_suas.py`(advisor 소유, 별도 테이블 `advisor_suas_schedule`)가 원본에서 직접 파싱한다. 비정형(`SR-SS`/`BY NOTAM`/공휴일 예외 등)은 발효 여부를 단정하지 않고 `confirm_required`로만 표시(안전 우선, 창작·억측 금지). `frontend/js/route-bottlenecks.js`(A5)가 경로-폴리곤 교차 + 통과 예상시각으로 판정해 병목 후보(`kind:"airspace"`)에 반영.
 > - **`sidstar`는 2026-07-23 사용자 요청으로 추가 구현**(원래 2단계 예정이었으나 범위 변경), 같은 날 **Jeppesen 항행DB CSV 이관으로 데이터 갭 해소**: 기존 사전빌드 `sidstar.json`(SID 14·STAR 103, 한국 17개 공항 부분 커버, 인천 SID·김포 전체 결측)은 이식 패키지 자체의 데이터 한계였다 — Jeppesen 원본 CSV 4종(SID/STAR/엔루트·터미널 지점) 적재로 인천·김포 포함 전 공항 SID+STAR 온전히 커버. `proc`(1=SID,2=STAR) 그대로 반환, bbox 없이 `airport` 단일 필터만. 프론트는 경로 선택 시 출발 공항의 SID·도착 공항의 STAR만 걸러 표시([04](./04-frontend-migration.md), `layers/route.js` `renderSidStar`) — 이 프론트 동작 자체는 무변경.
 > - `firko`는 **소스 자체가 없다**: `사전빌드_JSON/`에 `firko.json`이 존재하지 않고(원본 HTML에만 내장돼 있을 가능성), 임의로 한글 FIR명을 만들어 넣지 않는다(허위 정보 생성 금지 원칙). 필요해지면 원본 HTML에서 `FIRKO` const 블록만 스크립트로 추출(전체 Read 금지, §6)해 아티팩트로 남길 것.
 > - `zoom`은 파라미터로는 받되(airways/airports/navaids/waypoints), 원본 `문서/03`이 airports "저배율은 민간/공용만" 외에는 구체적 수치 임계값을 규정하지 않아 실제 씨닝 로직은 아직 붙이지 않았다 — 프론트(F5/F9) 연동 시 실사용 줌 레벨을 보고 확정.
@@ -83,12 +84,15 @@
       "incheon_track_fixes": ["ATOTI","TESIM"],
       "track_coords": [[lat,lon], ...],
       "full_route_coords": [[lat,lon], ...],
-      "cruise_parity": "O"
+      "cruise_parity": "O",
+      "gate_in": "ATOTI", "gate_out": "OLMEN",
+      "runway_dist": [["33L", 80], ["15R", 13], ["34R", 7]]
     }
   ]
 }
 ```
 - 집계 산출·좌표해석은 [02](./02-db-integration.md) §4 (배치). 이 API는 사전집계 결과를 서빙.
+- **터미널 신호(A6, [13](./13-ai-reasoning-dev-plan.md) STEP A6, 2026-07-24 구현 완료)**: `gate_in`/`gate_out`은 이 경로그룹의 최빈 진출입 게이트(`processed_flight_data.entry_fir`/`exit_fir`에서 — 컬럼명과 달리 실측상 FIR 코드가 아니라 5자 픽스명, 예: `KARBU`), 결측이면 `null`. `runway_dist`는 출발 활주로 분포(`[[활주로, pct], ...]`, `processed_acdm_departure.runway`를 callsign=flight_icao·date=operation_date로 조인 — 실측 매칭률 99.9%), 매칭 없으면 `[]`. 완성본은 이 정보를 OD 단위 `odInfo`에 뒀지만 D20 확정([14](./14-improvement-request.md) §8 C-2)에 따라 advisor는 경로그룹 단위로 노출한다(경로옵션마다 실제 진출입 게이트/활주로가 다를 수 있어 OD 전체로 뭉치면 정보 손실). 이건 **표시·근거용**이며 터미널 *최적화*(활주로 혼잡 등)는 후속.
 
 ### 4.2 공항 운항(ACDM KPI) — 구현됨(2단계, 2026-07-23)
 | 엔드포인트 | 설명 | 출처 | 정렬키 |

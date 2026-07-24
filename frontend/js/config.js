@@ -89,6 +89,14 @@ const DEFAULT_CONFIG = {
     // (완성본 ctx.strokeStyle='#8e24aa'와 동일, PORTING_PACKAGE_ROOT 이식 2026-07-23).
     stcaCaution: "#f08c00",
     cpaPurple: "#8e24aa",
+    // 섹터 교통 등급(A4, docs/13 STEP A4) 전용 — 완성본 trafficGrade()와 동일 색상이지만
+    // shear/STCA와 같은 이유(2026-07-23 SIGMET 색상충돌 교훈)로 별도 토큰을 쓴다.
+    trafficLight: "#2e7d32",
+    trafficModerate: "#e8590c",
+    trafficHeavy: "#d62828",
+    // SUAS/MOA(특수공역) 전용 — 기존 토큰(orange/hazardRed/cpaPurple 등)과 색상 충돌
+    // 방지(2026-07-23 SIGMET 교훈과 동일 이유로 별도 신설, 2026-07-24).
+    suas: "#5f3dc4",
   },
   adsb: {
     pollMs: 12000,
@@ -181,6 +189,15 @@ const DEFAULT_CONFIG = {
     sampleMinPoints: 6,
     sampleMaxPoints: 16,
     sampleDegreesPerPoint: 3, // 경로 표본지점 수 = clamp(round(총거리(도)/3), min, max)
+  },
+  // 실시간 섹터 교통·수요예측(A4, docs/13 STEP A4) — 완성본 analyzeFIR의 수치를 그대로 이식.
+  // 기상샘플(dBZ)·회피반경은 이번 라운드 범위 밖(docs/07-checklist.md A4 항목 "정직하게
+  // 명시" 참고 — 수용기준 3개(현재/예측 대수·등급, 통과 섹터 표시, ADS-B 미가용 degrade)는
+  // 교통량뿐이라 기상 결합은 후속으로 미룸).
+  sectors: {
+    trafficThresholds: [7, 12], // [보통 임계, 혼잡 임계] — n>=12 혼잡, n>=7 보통, 그 미만 원활
+    trendDelta: 2, // 예측(10분후) 대수가 현재보다 이 값 넘게 크면 ▲, 작으면 ▼
+    forecastMinutes: [10, 40], // 완성본 fut20(변수명 유지, 실제 10분)/fut40과 동일한 외삽 시각
   },
 };
 

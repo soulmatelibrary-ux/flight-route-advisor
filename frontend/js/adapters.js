@@ -19,6 +19,22 @@ export function toTca(r) {
   return { name: r.name, nameKo: r.name_ko, polygon: r.polygon };
 }
 
+/** SUAS/MOA 특수공역 1건(2026-07-24 신규). EFF_TIMES(발효시간)는 응답에 없음(docs/13 STEP A7 소관). */
+export function toSuas(r) {
+  return {
+    ident: r.ident, name: r.name, type: r.type,
+    upper: r.upper, lower: r.lower, polygon: r.polygon, region: r.region,
+    // 발효시간(A7, docs/13 STEP A7) — effTimesRaw는 원문 참고용, scheduleStatus는
+    // "structured"|"confirm_required"|null(배치 미실행), scheduleSegments는 structured일
+    // 때만 [{days,utcStart,utcEnd}, ...](세그먼트 내부 키도 camelCase로 변환).
+    effTimesRaw: r.eff_times_raw,
+    scheduleStatus: r.schedule_status,
+    scheduleSegments: r.schedule_segments?.map((s) => ({
+      days: s.days, utcStart: s.utc_start, utcEnd: s.utc_end,
+    })) ?? null,
+  };
+}
+
 /** 항공로 구간 1건. a/b는 이미 [lat,lon] — coords로 묶어 Leaflet 폴리라인에 바로 사용. */
 export function toAirway(r) {
   return { ident: r.ident, seq: r.seq, coords: [r.a, r.b], upper: r.upper, lower: r.lower };
@@ -65,6 +81,10 @@ export function toRouteOption(o) {
     trackCoords: o.track_coords,
     fullRouteCoords: o.full_route_coords,
     cruiseParity: o.cruise_parity,
+    // 터미널 신호(A6, docs/13 STEP A6) — 진출입 게이트·출발 활주로 분포.
+    gateIn: o.gate_in,
+    gateOut: o.gate_out,
+    runwayDist: o.runway_dist,
   };
 }
 
@@ -115,6 +135,11 @@ export function toAirportOpsSummary(s) {
     avgTaxiInMin: s.avg_taxi_in_min,
     avgFirToAppMin: s.avg_fir_to_app_min,
   };
+}
+
+/** /api/reference/acc-sectors 응답의 섹터 1건 → camelCase(F3 어댑터 규약, docs/13 STEP A4). */
+export function toAccSector(r) {
+  return { sectorId: r.sector_id, nameEn: r.name_en, acc: r.acc, polygon: r.polygon };
 }
 
 export function toOptArray(o) {

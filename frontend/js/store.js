@@ -178,23 +178,34 @@ export function selectOption(index) {
   notify({ type: "option:selected" });
 }
 
+// 각 레이어를 독립 실패로 처리한다(리뷰 지적, 2026-07-24) — Promise.all 그대로 두면 7개 중
+// 하나(예: SUAS — 이 중 가장 최근에 추가돼 검증이 가장 덜 된 엔드포인트)만 실패해도 이미
+// 성공한 나머지 6개(FIR·공항 등 핵심 데이터 포함)까지 전부 못 쓰게 된다 — 이 코드베이스의
+// 다른 레이어들(FOIS의 allSettled, SIGMET/PIREP의 toast-and-continue, 섹터패널의
+// catch→빈배열)이 이미 지키는 "레이어별 독립 실패" 원칙과 어긋난다. 실패한 레이어는
+// 콘솔 경고 후 빈 배열로 대체 — 다른 레이어 렌더링을 막지 않는다.
 async function ensureBulkLoaded() {
   if (state.bulk) return; // 세션 캐시 — 모드 재전환 시 재요청하지 않음(§3.1 6번 각주)
-  const [firs, tca, airways, airports, navaids, waypoints] = await Promise.all([
-    api.firs(),
-    api.tca(),
-    api.airways(),
-    api.airports(),
-    api.navaids(),
-    api.waypoints(),
-  ]);
+  const names = ["firs", "tca", "airways", "airports", "navaids", "waypoints", "suas"];
+  const fetchers = [api.firs, api.tca, api.airways, api.airports, api.navaids, api.waypoints, api.suas];
+  const outcomes = await Promise.allSettled(fetchers.map((fn) => fn()));
+  const raw = {};
+  outcomes.forEach((outcome, i) => {
+    if (outcome.status === "fulfilled") {
+      raw[names[i]] = outcome.value.data;
+    } else {
+      console.error(`참조 레이어 '${names[i]}' 조회 실패 — 빈 배열로 대체`, outcome.reason);
+      raw[names[i]] = [];
+    }
+  });
   state.bulk = {
-    firs: firs.data.map(adapt.toFir),
-    tca: tca.data.map(adapt.toTca),
-    airways: airways.data.map(adapt.toAirway),
-    airports: airports.data.map(adapt.toAirport),
-    navaids: navaids.data.map(adapt.toNavaid),
-    waypoints: waypoints.data.map(adapt.toWaypoint),
+    firs: raw.firs.map(adapt.toFir),
+    tca: raw.tca.map(adapt.toTca),
+    airways: raw.airways.map(adapt.toAirway),
+    airports: raw.airports.map(adapt.toAirport),
+    navaids: raw.navaids.map(adapt.toNavaid),
+    waypoints: raw.waypoints.map(adapt.toWaypoint),
+    suas: raw.suas.map(adapt.toSuas),
   };
   for (const f of state.bulk.firs) state.derived.firByIcao.set(f.icao, f);
   for (const a of state.bulk.airports) state.derived.airportByIcao.set(a.icao, a);

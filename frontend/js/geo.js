@@ -53,6 +53,22 @@ export function pointInBounds(lat, lon, bounds) {
   return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon;
 }
 
+/**
+ * 점-폴리곤 판정(레이캐스팅, 완성본 `pip(lat,lon,fl)` 이식 — docs/13 STEP A4). 원본은 폴리곤을
+ * flat 배열([lat0,lon0,lat1,lon1,...])로 받지만 이 코드베이스는 폴리곤을 [[lat,lon],...] 쌍
+ * 배열로 다루므로(reference.js/route.js와 동일 관례) 그 형태로 인덱싱만 바꿔 이식했다 —
+ * 판정 로직(교차 계산) 자체는 원본과 동일.
+ */
+export function pointInPolygon(lat, lon, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [yi, xi] = ring[i];
+    const [yj, xj] = ring[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 /** 여러 bbox를 하나로 감싸는 bbox(서버에 bbox 쿼리 하나로 보낼 때 씀). */
 export function unionBounds(boundsList) {
   let minLat = Infinity;

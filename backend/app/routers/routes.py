@@ -40,8 +40,7 @@ def _validate_icao(value: str, field: str) -> str:
 @router.get("/od-pairs")
 def get_od_pairs():
     try:
-        data = routes_query.od_pairs()
-        period = routes_query.data_period()
+        data, period = routes_query.od_pairs()
     except _ODR2_ERRORS as exc:
         raise HTTPException(status_code=503, detail="ODR2 데이터가 아직 생성되지 않음") from exc
     return envelope(data, source="odr2-batch", data_period=period)
@@ -55,8 +54,7 @@ def get_routes(
     dep = _validate_icao(dep, "dep")
     arr = _validate_icao(arr, "arr")
     try:
-        data = routes_query.routes_for(dep, arr)
-        period = routes_query.data_period()
+        data, period = routes_query.routes_for(dep, arr)
     except _ODR2_ERRORS as exc:
         raise HTTPException(status_code=503, detail="ODR2 데이터가 아직 생성되지 않음") from exc
     if data is None:
@@ -74,8 +72,7 @@ def get_route_flow(
     dep = _validate_icao(dep, "dep")
     arr = _validate_icao(arr, "arr")
     try:
-        data = flow_query.flow_for(dep, arr)
-        period = flow_query.data_period()
+        data, period = flow_query.flow_for(dep, arr)
     except _FLOW_ERRORS as exc:
         raise HTTPException(status_code=503, detail="흐름관리 영향률 데이터가 아직 생성되지 않음") from exc
     return envelope(data, source="flow-batch", data_period=period)

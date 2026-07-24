@@ -130,6 +130,16 @@ def get_waypoints(
     return envelope(data, source="reference-db")
 
 
+@router.get("/acc-sectors")
+def get_acc_sectors(response: Response):
+    try:
+        data = loader.load_acc_sectors()
+    except _DB_ERRORS as exc:
+        raise HTTPException(status_code=503, detail="DB에 연결할 수 없음") from exc
+    _set_long_cache(response)
+    return envelope(data, source="reference-db")
+
+
 @router.get("/sidstar")
 def get_sidstar(
     response: Response,
@@ -139,5 +149,23 @@ def get_sidstar(
         data = loader.load_sidstar(airport=airport)
     except _DB_ERRORS as exc:
         raise HTTPException(status_code=503, detail="DB에 연결할 수 없음") from exc
+    _set_long_cache(response)
+    return envelope(data, source="reference-db")
+
+
+@router.get("/suas")
+def get_suas(
+    response: Response,
+    bbox: str | None = Query(default=None, description="minLat,minLon,maxLat,maxLon"),
+    region: str | None = Query(default=None, description="kr(한국)|world(세계), 생략 시 전체"),
+):
+    """SUAS/MOA 특수공역(docs/03 §3 신규, 2026-07-24). EFF_TIMES(발효시간)는 docs/13 STEP A7
+    소관이라 이 응답엔 없음."""
+    try:
+        data = loader.load_suas(bbox=bbox, region=region)
+    except _DB_ERRORS as exc:
+        raise HTTPException(status_code=503, detail="DB에 연결할 수 없음") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     _set_long_cache(response)
     return envelope(data, source="reference-db")

@@ -39,39 +39,27 @@ import sqlalchemy as sa
 from sqlalchemy import select
 
 from app.db import artifact_session
+from app.db import column_map
 from app.db.session import get_engine
 from app.queries.latest_run import latest_view
 from batch.build_odr2 import _load_dafif_lookups
 
-# --- advisor_flow_* 6종 (경량 Core 프록시, 스키마 단일 출처는 data-ingestion-backend
-# alembic d4f7a91c3e26_*·column_map.ADVISOR_FLOW_COLUMNS) ---
-_FLOW_OD = sa.table(
-    "advisor_flow_od",
-    sa.column("dep"), sa.column("arr"), sa.column("impact_pct"), sa.column("affected_flights"),
-    sa.column("total_flights"), sa.column("on_time_affected"), sa.column("on_time_normal"),
-    sa.column("delay_affected_min"), sa.column("delay_normal_min"), sa.column("data_period"),
-    sa.column("generated_at"),
-)
-_FLOW_OD_REASON = sa.table(
-    "advisor_flow_od_reason",
-    sa.column("dep"), sa.column("arr"), sa.column("seq"), sa.column("reason_code"), sa.column("pct"),
-)
-_FLOW_OD_LIMIT = sa.table(
-    "advisor_flow_od_limit",
-    sa.column("dep"), sa.column("arr"), sa.column("seq"), sa.column("limit_text"),
-)
-_FLOW_OD_MEASURE = sa.table(
-    "advisor_flow_od_measure",
-    sa.column("dep"), sa.column("arr"), sa.column("seq"), sa.column("measure_id"),
-)
-_FLOW_OD_HOUR = sa.table(
-    "advisor_flow_od_hour",
-    sa.column("dep"), sa.column("arr"), sa.column("hour"), sa.column("impact_pct"),
-)
-_FLOW_ROUTE_GROUP = sa.table(
-    "advisor_flow_route_group",
-    sa.column("dep"), sa.column("arr"), sa.column("route_key"), sa.column("pct"),
-)
+
+def _proxy(table_name: str):
+    """`build_odr2._proxy`와 동일한 이유 — `column_map.ADVISOR_FLOW_COLUMNS`를 단일
+    출처로 삼아 컬럼명 중복 하드코딩(alembic DDL과 어긋날 위험)을 없앤다(리뷰 지적사항,
+    2026-07-23)."""
+    return sa.table(table_name, *(sa.column(c) for c in column_map.ADVISOR_FLOW_COLUMNS[table_name]))
+
+
+# --- advisor_flow_* 6종 (스키마 단일 출처는 data-ingestion-backend alembic
+# d4f7a91c3e26_*·column_map.ADVISOR_FLOW_COLUMNS) ---
+_FLOW_OD = _proxy("advisor_flow_od")
+_FLOW_OD_REASON = _proxy("advisor_flow_od_reason")
+_FLOW_OD_LIMIT = _proxy("advisor_flow_od_limit")
+_FLOW_OD_MEASURE = _proxy("advisor_flow_od_measure")
+_FLOW_OD_HOUR = _proxy("advisor_flow_od_hour")
+_FLOW_ROUTE_GROUP = _proxy("advisor_flow_route_group")
 _FLOW_TABLE_NAMES = (
     "advisor_flow_route_group",
     "advisor_flow_od_hour",
@@ -280,7 +268,10 @@ def _od_aggregate(
 ) -> dict[str, dict[str, Any]]:
     by_od: dict[str, list[int]] = defaultdict(list)
     for i, f in enumerate(flights):
-        if f.dep and f.dest:
+        # build_odr2.aggregate()와 동일한 ICAO 4자리 검증(리뷰 지적사항, 2026-07-23) —
+        # dep/dest에 "|"가 섞여 들어오는 기형 데이터가 OD 키 파싱(_persist의 split("|"))을
+        # 깨뜨리는 것을 막는다.
+        if len(f.dep) == 4 and len(f.dest) == 4:
             by_od[f"{f.dep}|{f.dest}"].append(i)
 
     od_out: dict[str, dict[str, Any]] = {}
@@ -351,7 +342,7 @@ def _route_group_aggregate(
     연속중복제거 토큰 중 DAFIF에 존재하는 것만)에 대한 영향률(%)."""
     groups: dict[tuple[str, str, str], list[int, int]] = defaultdict(lambda: [0, 0])
     for i, f in enumerate(flights):
-        if not (f.dep and f.dest and f.ext_route_dedup):
+        if not (len(f.dep) == 4 and len(f.dest) == 4 and f.ext_route_dedup):
             continue
         oknames = [nm for nm in f.ext_route_dedup if nm in lookup]
         if not oknames:

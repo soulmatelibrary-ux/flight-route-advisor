@@ -355,5 +355,12 @@ export function createWindLayer(map, CONFIG) {
     renderPanel();
   }
 
-  return { shearLayer, update, clear };
+  /** 세그먼트 병목 종합(A5, docs/13 STEP A5)이 읽는 최소 요약 — 추천 고도의 배풍/시어만
+   * 노출한다(전체 `cached` 내부 구조는 이 위젯 소관이라 캡슐화 유지). 아직 조회 전/실패/
+   * 데이터 없음이면 null — 호출부가 "신호 없음"으로 자연스럽게 취급. */
+  function getRecommendation() {
+    return cached ? cached.rec : null;
+  }
+
+  return { shearLayer, update, clear, getRecommendation };
 }

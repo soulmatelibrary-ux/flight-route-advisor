@@ -8,6 +8,8 @@ import { createReferenceLayers } from "./layers/reference.js";
 import { createRouteLayers } from "./layers/route.js";
 import { createWindLayer } from "./layers/wind.js";
 import { createAdsbLayer } from "./layers/adsb.js";
+import { createSectorPanel } from "./analyze-sectors.js";
+import { createBottlenecksPanel } from "./route-bottlenecks.js";
 import { createHazardLayers } from "./layers/hazards.js";
 import { createRadarLayer } from "./layers/radar.js";
 import { createGroupedLayerControl } from "./layer-control.js";
@@ -105,6 +107,23 @@ async function main() {
   const routeLayers = createRouteLayers(map, CONFIG);
   const windLayer = createWindLayer(map, CONFIG);
   const adsb = createAdsbLayer(map, CONFIG);
+  // 실시간 섹터 교통·수요예측(A4, docs/13 STEP A4) — adsb.js의 매 폴링 스냅샷을 구독해
+  // 선택된 경로가 지나는 섹터의 현재/+10분 교통량을 갱신한다(windLayer와 동일한 선택 경로
+  // 연동 지점, 아래 od:selected/option:selected 핸들러 참고).
+  const sectorPanel = createSectorPanel(CONFIG);
+  // 세그먼트 병목 종합(A5, docs/13 STEP A5) — A1(흐름관리)·A3(상층풍)·A4(섹터교통)를 한 패널로.
+  // windLayer/sectorPanel의 update()가 끝난 뒤에만 호출해야 그 둘의 getRecommendation()/
+  // getDemand()가 최신 값을 반환한다(아래 option:selected 핸들러에서 Promise.all로 순서 보장).
+  const bottlenecksPanel = createBottlenecksPanel(CONFIG, windLayer, sectorPanel);
+  adsb.onSnapshot((aircraft) => {
+    sectorPanel.onAircraftUpdate(aircraft);
+    // 섹터 패널 자체는 매 폴링(12초)마다 실시간 갱신되는데 A5 패널은 선택 시점에 한 번만
+    // 그려서 그 사이 정체 신호가 새로 생겨도 반영이 안 됐다(리뷰 지적, 2026-07-24) — A1(흐름
+    // 관리)은 재조회하지 않고 A4(섹터 교통) 표시만 최신화(refreshSectorSignal 내부에서 현재
+    // 선택된 노선인지 확인 후 무해하게 무시).
+    const state = getState();
+    bottlenecksPanel.refreshSectorSignal(state.dep, state.arr);
+  });
   // 실시간 항공기는 기본 꺼짐(참고 완성본 원본 주석 "실시간 항공기 — 기본 꺼짐"과 동일,
   // 사용자 요청 2026-07-23) — adsb.start()는 폴링을 그대로 돌려 STCA/CPA 계산에 쓰지만
   // 마커 표시 자체는 레이어 컨트롤에서 켤 때만.
@@ -154,9 +173,8 @@ async function main() {
 
   // 그룹형 레이어 컨트롤(사용자 요청 2026-07-23, 참고 완성본과 동일한 3섹션 구성) —
   // Leaflet 기본 L.control.layers는 평면 목록만 지원해 섹션 구분이 안 되므로 커스텀
-  // 컨트롤(layer-control.js)로 교체. SUAS 특수공역(한국/세계)은 원본 데이터가 아직 DB
-  // 미적재라(사용자 확인, 2026-07-23) 이번 라운드는 보류 — Stage 0 적재 완료 후 "절차·공역"
-  // 섹션에 추가한다.
+  // 컨트롤(layer-control.js)로 교체. SUAS 특수공역(한국/세계)은 2026-07-24 DB 적재 완료 —
+  // "절차·공역" 섹션에 2개 체크박스로 추가(referenceLayers.setGroupEnabled와 동일 패턴).
   createGroupedLayerControl(map, [
     {
       title: "기본 항공정보",
@@ -201,6 +219,16 @@ async function main() {
       items: [
         { label: "SID 출발절차(한국)", layer: routeLayers.sidGroup },
         { label: "STAR 도착절차(한국)", layer: routeLayers.starGroup },
+        {
+          label: "특수공역 SUAS/MOA(한국)",
+          checked: referenceLayers.isGroupEnabled("suasKr"),
+          onChange: (checked) => referenceLayers.setGroupEnabled("suasKr", checked),
+        },
+        {
+          label: "특수공역 SUAS/MOA(세계)",
+          checked: referenceLayers.isGroupEnabled("suasWorld"),
+          onChange: (checked) => referenceLayers.setGroupEnabled("suasWorld", checked),
+        },
       ],
     },
     {
@@ -297,6 +325,13 @@ async function main() {
   // 2026-07-23). sidstar 데이터는 한국 공항만 있어(원본 문서/08 §SS) 외국 공항이면
   // 그냥 빈 배열이 온다 — ICAO 접두사로 미리 거를 필요 없이 결과만 각 역할별로 필터.
   let sidStarSeq = 0;
+  // A5(경로 병목 종합) 오케스트레이션 전용 세대 토큰 — bottlenecksPanel 내부의 `seq`(update()
+  // 호출 간 순서)와는 별개 문제를 막는다: 사용자가 노선을 고르자마자 빠르게 선택 해제하면
+  // (bottlenecksPanel.clear() 먼저 실행) windLayer/sectorPanel의 Promise.all이 뒤늦게 끝나면서
+  // 이미 숨긴 패널을 다시 그릴 수 있었다(리뷰 지적, 2026-07-24) — 아래 두 지점(선택/해제)
+  // 모두에서 증가시켜, Promise.all의 `.then()`이 실행될 때 "그 사이 다른 선택/해제가
+  // 없었는지"를 확인한다.
+  let bottlenecksSeq = 0;
   async function refreshSidStar(dep, arr) {
     const seq = ++sidStarSeq;
     // 출발/도착 중 하나만 조회 실패해도(네트워크 일시 오류 등) 나머지 하나는 보여준다
@@ -338,6 +373,7 @@ async function main() {
       referenceLayers.renderFirs(state.focusFirs);
       referenceLayers.renderAirways(state.focusAirways);
       referenceLayers.renderTca([]);
+      referenceLayers.renderSuas([]);
       referenceLayers.renderWaypoints(state.focusWaypoints);
       referenceLayers.renderNavaids([]);
       referenceLayers.renderAirports(focusAirportsFor(state));
@@ -345,6 +381,7 @@ async function main() {
     } else if (state.bulk) {
       referenceLayers.renderFirs(state.bulk.firs);
       referenceLayers.renderTca(state.bulk.tca);
+      referenceLayers.renderSuas(state.bulk.suas);
       referenceLayers.renderAirports(state.bulk.airports);
       referenceLayers.showBulk();
       applyBulkOverlayFilters(state);
@@ -394,15 +431,30 @@ async function main() {
         refreshSidStar(state.dep, state.arr);
         // 상층풍·연직시어·추천고도(A3, docs/13) — 선택된 경로 하나에 대해서만 의미가
         // 있어 "전체 겹쳐보기"(옵션 여럿, selectedOptionIndex===null)에서는 숨긴다.
-        windLayer.update(coords, opt.cruiseParity);
+        // A5는 A3/A4의 계산이 끝난 뒤 그 요약을 읽으므로 Promise.all로 순서를 보장한다
+        // (개별 update()를 각자 fire-and-forget으로 두면 A5가 이전 경로의 stale 요약을
+        // 읽을 수 있음). myBottlenecksSeq로 그 사이 다른 선택/해제가 없었는지 재확인
+        // (리뷰 지적, 2026-07-24 — 빠른 선택→해제 시 이미 clear()된 패널을 뒤늦게 다시
+        // 그리는 문제 방지) + windLayer/sectorPanel이 예외를 던지면 조용히 건너뜀(각
+        // 모듈이 자기 실패는 이미 자체 UI로 표시하므로 여기서 추가로 알릴 필요 없음).
+        const myBottlenecksSeq = ++bottlenecksSeq;
+        Promise.all([windLayer.update(coords, opt.cruiseParity), sectorPanel.update(coords)])
+          .then(() => {
+            if (myBottlenecksSeq !== bottlenecksSeq) return;
+            bottlenecksPanel.update(state.dep, state.arr, coords);
+          })
+          .catch(() => {});
       } else {
         adsb.setRouteCoords(null);
         // 선택 해제 시에도 세대 토큰을 증가시켜야 한다 — 안 그러면 이미 늦게 도착한
         // 이전 선택의 SID/STAR 응답이 seq 검사를 그대로 통과해 방금 지워진 레이어를
         // 다시 채워 넣는다(리뷰 지적사항, 2026-07-23).
         sidStarSeq += 1;
+        bottlenecksSeq += 1; // 진행 중이던 A5 조합(Promise.all)도 폐기 대상
         routeLayers.renderSidStar([]);
         windLayer.clear();
+        sectorPanel.clear();
+        bottlenecksPanel.clear();
       }
     }
     if (event.type === "viewmode:changed") {

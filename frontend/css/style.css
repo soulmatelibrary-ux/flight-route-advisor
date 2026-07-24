@@ -116,6 +116,15 @@ html, body {
 .wlvl-btn.rec::after { content: " ★"; }
 .wind-grade { display: inline-block; padding: 1px 6px; border-radius: 4px; color: #fff; font-weight: 600; }
 
+/* 실시간 섹터 교통·수요예측(A4, docs/13-ai-reasoning-dev-plan.md) — #sector-panel도 .route-wind
+   기본 여백/폰트를 그대로 재사용(레이아웃 일관성), 행 배치만 별도 정의. */
+.sector-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sector-grade { display: inline-block; padding: 1px 6px; border-radius: 4px; color: #fff; font-weight: 600; white-space: nowrap; }
+
+/* 세그먼트 병목 신호 종합(A5, docs/13-ai-reasoning-dev-plan.md) — #route-bottlenecks */
+.bottleneck-row { padding: 2px 0; }
+.bottleneck-row.bottleneck-warn { color: #c0392b; font-weight: 600; }
+
 .error { color: #c0392b; font-size: 12px; }
 
 #map-wrap { position: relative; }

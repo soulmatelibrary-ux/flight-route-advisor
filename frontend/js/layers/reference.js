@@ -32,6 +32,8 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
     airportsLow: L.layerGroup(),
     airportsAll: L.layerGroup(),
     navaids: L.layerGroup(),
+    suasKr: L.layerGroup(),
+    suasWorld: L.layerGroup(),
   };
 
   function clear(name) {
@@ -45,7 +47,11 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
   // on/off의 단일 출처로 두고, showFocus/showBulk/부팅 시 초기화 모두 이걸 참조한다.
   // 기본값(true 3개+false tca)은 기존 부팅 동작과 동일 — main.js가 하던 개별 addTo 루프를
   // 여기로 옮겼다.
-  const enabledByName = { firs: true, tca: false, airways: true, waypoints: true, navaids: true };
+  const enabledByName = {
+    firs: true, tca: false, airways: true, waypoints: true, navaids: true,
+    // SUAS/MOA(특수공역, 2026-07-24 신규) — tca와 동일하게 기본 꺼짐(보조 참조 레이어).
+    suasKr: false, suasWorld: false,
+  };
 
   function setGroupEnabled(name, enabled) {
     enabledByName[name] = enabled;
@@ -113,6 +119,30 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
         .addTo(groups.tca);
     }
     updateLabelVisibility();
+  }
+
+  function renderSuas(rows) {
+    // SUAS/MOA(특수공역, 2026-07-24 신규) — tca와 동일한 폴리곤 렌더 패턴이지만 한국/세계를
+    // 별도 레이어그룹(체크박스 2개)으로 분리한다(사용자 요청). EFF_TIMES(발효시간)는
+    // 응답에 없다(docs/13 STEP A7 소관) — 팝업에 발효시간 문구를 넣지 않는다(단정 금지).
+    clear("suasKr");
+    clear("suasWorld");
+    for (const s of rows) {
+      const group = s.region === "kr" ? groups.suasKr : groups.suasWorld;
+      L.polygon([s.polygon], {
+        renderer: canvasRenderer,
+        color: CONFIG.tokens.suas,
+        weight: 1,
+        dashArray: "4,4",
+        fillColor: CONFIG.tokens.suas,
+        fillOpacity: 0.08,
+      })
+        .bindPopup(
+          `<b>${escapeHtml(s.ident)}</b>${s.name ? `<br>${escapeHtml(s.name)}` : ""}` +
+            `<br>${escapeHtml(s.type)} · ${escapeHtml(s.lower ?? "")}–${escapeHtml(s.upper ?? "")}`,
+        )
+        .addTo(group);
+    }
   }
 
   function renderAirways(rows) {
@@ -252,6 +282,7 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
     canvasRenderer,
     renderFirs,
     renderTca,
+    renderSuas,
     renderAirways,
     renderWaypoints,
     renderNavaids,
@@ -270,13 +301,15 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
       // firs/airways/waypoints는 체크박스 상태(enabledByName)를 존중한다(리뷰 지적 — 예전엔
       // 무조건 addLayer해 껐다 켠 상태가 뷰모드 전환마다 되살아났음).
       applyEnabledGroups(["firs", "airways", "waypoints"]);
-      for (const name of ["tca", "navaids"]) map.removeLayer(groups[name]);
+      // suasKr/suasWorld도 tca/navaids와 동일하게 focus 스코프 fetch가 없어(전세계 정적
+      // 참조 데이터라 bulk 로드 1회로 충분, 2026-07-24) 체크박스와 무관하게 계속 숨긴다.
+      for (const name of ["tca", "navaids", "suasKr", "suasWorld"]) map.removeLayer(groups[name]);
     },
     showBulk() {
       // 전부 체크박스 상태(enabledByName)를 존중한다(리뷰 지적, 2026-07-23 — 처음엔 TCA만
       // 개별 방어했으나 firs/항공로/픽스/항행시설도 뷰모드 전환마다 무조건 addLayer돼
       // 체크박스로 꺼둔 상태가 도로 켜지는 동일한 문제가 있었음).
-      applyEnabledGroups(["firs", "tca", "airways", "waypoints", "navaids"]);
+      applyEnabledGroups(["firs", "tca", "airways", "waypoints", "navaids", "suasKr", "suasWorld"]);
       applyAirportZoomVisibility();
     },
     setAirportsEnabled,

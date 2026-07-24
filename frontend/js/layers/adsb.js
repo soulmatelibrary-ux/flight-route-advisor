@@ -564,6 +564,16 @@ export function createAdsbLayer(map, CONFIG) {
   // 남아 있었음). 진행 중인 poll()이 있으면 이번 tick은 건너뛴다.
   let pollInFlight = false;
 
+  // 실시간 섹터 교통·수요예측(A4, docs/13 STEP A4) 구독자 — analyze-sectors.js가 매
+  // 폴링 사이클마다 최신 기체 스냅샷(lat/lon/gs/track/alt_baro)을 받아 섹터 배정·외삽을
+  // 재계산한다. adsb.js 자체는 섹터 로직을 몰라도 되도록(관심사 분리) 원시 배열만 넘긴다.
+  const snapshotSubscribers = new Set();
+
+  function onSnapshot(callback) {
+    snapshotSubscribers.add(callback);
+    return () => snapshotSubscribers.delete(callback);
+  }
+
   async function poll(chipEl) {
     if (pollInFlight) return;
     pollInFlight = true;
@@ -598,6 +608,9 @@ export function createAdsbLayer(map, CONFIG) {
       prune(seen);
       renderAlertPanel();
       fetchRouteCodes().catch(() => {}); // 백그라운드 배치 캐시 충전 — 폴링 자체를 막지 않음
+      // null(=미가용)과 구분되는 빈 배열([])도 유효한 스냅샷 — 표시 반경 안에 기체가
+      // 0대인 정상 상태다(analyze-sectors.js가 "0대"와 "데이터 없음"을 구분해야 함).
+      for (const cb of snapshotSubscribers) cb(validAc);
       if (chipEl) {
         const time = new Date().toLocaleTimeString("ko-KR", { hour12: false });
         chipEl.textContent = `ADS-B ${seen.size}대 · ${time}`;
@@ -607,6 +620,7 @@ export function createAdsbLayer(map, CONFIG) {
       consecutiveFailures += 1;
       // 마지막으로 받은 데이터(마커)는 그대로 유지 — 실패라고 지도를 비우지 않는다(05_트러블슈팅.md).
       if (chipEl) chipEl.textContent = `ADS-B 조회 실패(${consecutiveFailures}회) — ${err.message ?? "알 수 없는 오류"}`;
+      for (const cb of snapshotSubscribers) cb(null); // 미가용 — analyze-sectors.js가 "데이터 없음"으로 degrade
       rescheduleIfNeeded(chipEl);
     } finally {
       pollInFlight = false;
@@ -645,5 +659,5 @@ export function createAdsbLayer(map, CONFIG) {
     homeCenter = latlon;
   }
 
-  return { group, start, stop, setRouteCoords, setHomeCenter, setStcaEnabled, setCpaEnabled };
+  return { group, start, stop, setRouteCoords, setHomeCenter, setStcaEnabled, setCpaEnabled, onSnapshot };
 }

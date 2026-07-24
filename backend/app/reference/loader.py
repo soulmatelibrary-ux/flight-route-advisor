@@ -207,6 +207,66 @@ def load_waypoints(bbox: str | None = None, limit: int = WAYPOINTS_LIMIT_MAX) ->
     ]
 
 
+def load_acc_sectors() -> dict:
+    """ACC 관제섹터 (docs/03 §3: acc-sectors, docs/13 STEP A4 선행). 한국(인천/대구)만 커버하는
+    정적 데이터라 bbox 필터 없이 전체 반환(14개 섹터 — 필터링이 무의미할 만큼 작음).
+
+    응답은 원본 `ACCS {acc,sectors}` 스키마를 그대로 따른다 — `sectors`는 `frontend/js/
+    analyze-sectors.js`의 point-in-polygon 배정이 seq(원본 배열 순서) 그대로를 요구하므로
+    fetch_acc_sectors()가 이미 seq 오름차순으로 반환한 순서를 그대로 유지한다.
+    """
+    sectors = [
+        {"sector_id": sid, "name_en": name_en, "acc": acc, "polygon": polygon}
+        for sid, name_en, acc, polygon in reference_queries.fetch_acc_sectors()
+    ]
+    acc: dict[str, list[list[list[float]]]] = {}
+    for acc_code, polygon in reference_queries.fetch_acc_boundaries():
+        acc.setdefault(acc_code, []).append(polygon)
+    return {"acc": acc, "sectors": sectors}
+
+
+_SUAS_REGIONS = ("kr", "world")
+
+
+def load_suas(bbox: str | None = None, region: str | None = None) -> list[dict]:
+    """SUAS/MOA 특수공역 (docs/03 §3 신규, 2026-07-24 구현 — 사용자 요청으로 공역 좌표 DB 편입).
+
+    `region`: `kr`(한국)|`world`(세계) 화이트리스트, 생략 시 전체. `fetch_suas()`가 이미 최종
+    응답 모양(ident/name/type/upper/lower/polygon/region)으로 반환하므로 키 재매핑 없음.
+
+    **발효시간(A7, docs/13 STEP A7, 2026-07-24 구현 완료)**: `eff_times_raw`/`schedule_status`/
+    `schedule_segments`를 `ident`로 애플리케이션 레벨 조인해 덧붙인다. `advisor_suas_schedule`이
+    비어 있으면(배치 미실행) 전부 `None`으로 조용히 채운다(에러 아님, doc13 STEP A7 수용기준
+    (3) "SUAS 참조 레이어 미포팅 시 조용히 스킵"과 동일한 정신 — 배치가 안 돌았다고 SUAS
+    지오메트리 자체를 못 보여줄 이유는 없다).
+    """
+    rows = reference_queries.fetch_suas()
+    if region is not None:
+        region = region.strip().lower()
+        if region not in _SUAS_REGIONS:
+            raise ValueError(f"region 값이 올바르지 않음: {region!r} ({'/'.join(_SUAS_REGIONS)}만 허용)")
+        rows = [row for row in rows if row["region"] == region]
+    parsed_bbox = _parse_bbox(bbox)
+    if parsed_bbox is not None:
+        rows = [
+            row
+            for row in rows
+            if _flat_coords_bbox_overlaps(
+                [coord for pair in row["polygon"] for coord in pair], parsed_bbox
+            )
+        ]
+    schedule_by_ident = reference_queries.fetch_suas_schedule()
+    return [
+        {
+            **row,
+            "eff_times_raw": schedule_by_ident.get(row["ident"], {}).get("eff_times_raw"),
+            "schedule_status": schedule_by_ident.get(row["ident"], {}).get("status"),
+            "schedule_segments": schedule_by_ident.get(row["ident"], {}).get("segments"),
+        }
+        for row in rows
+    ]
+
+
 def load_sidstar(airport: str | None = None) -> list[dict]:
     """SID/STAR 절차 (docs/03 §3: SS, 한국만 — Jeppesen 항행DB 이관, 2026-07-23).
 

@@ -139,6 +139,9 @@ REFERENCE_COLUMNS: dict[str, tuple[str, ...]] = {
     ),
     "reference_waypoint_enroute": ("id", "waypoint_id", "icao_code", "fir_id", "name_descr", "lat", "lon"),
     "reference_waypoint_terminal": ("id", "waypoint_id", "region_code", "fir_id", "name_descr", "lat", "lon"),
+    "reference_acc_sector": ("id", "sector_id", "name_en", "acc", "seq", "polygon"),
+    "reference_acc_boundary": ("id", "acc", "polygon"),
+    "reference_suas": ("id", "ident", "name", "type", "upper", "lower", "polygon", "region"),
 }
 
 # --- advisor 소유 배치 아티팩트(odr2/flow, 파일→DB 통합) 12종. `backend/batch/
@@ -149,9 +152,14 @@ ADVISOR_ODR2_COLUMNS: dict[str, tuple[str, ...]] = {
     "advisor_odr2_od": ("dep", "arr", "total_flights", "data_period", "generated_at"),
     "advisor_odr2_route": (
         "dep", "arr", "rank", "flights", "avg_min", "delay_count", "heavy_count", "cruise_parity",
+        # 터미널 신호 스칼라 2종(A6, docs/13 STEP A6 — 완성본 odInfo/ext 이식) — 마이그레이션
+        # c3e7a1f6b0d4. 리스트(출발 활주로 분포)는 이 저장소의 완전 정규화 원칙에 따라
+        # advisor_odr2_route_runway 자식 테이블로 별도(route_fir/route_fix와 동일 패턴).
+        "gate_in", "gate_out",
     ),
     "advisor_odr2_route_fir": ("dep", "arr", "rank", "seq", "fir_icao"),
     "advisor_odr2_route_fix": ("dep", "arr", "rank", "seq", "fix_name"),
+    "advisor_odr2_route_runway": ("dep", "arr", "rank", "seq", "runway", "pct"),
     "advisor_odr2_track_point": ("dep", "arr", "rank", "seq", "lat", "lon"),
     "advisor_odr2_full_route_point": ("dep", "arr", "rank", "seq", "lat", "lon"),
 }
@@ -169,10 +177,18 @@ ADVISOR_FLOW_COLUMNS: dict[str, tuple[str, ...]] = {
     "advisor_flow_route_group": ("dep", "arr", "route_key", "pct"),
 }
 
+# SUAS/MOA 발효시간 파생(A7, docs/13 STEP A7 — 신규 파생이라 reference_*가 아니라 advisor_*
+# 네임스페이스, `backend/batch/build_suas.py` 소유, 스키마 단일 출처는 data-ingestion-backend
+# alembic `d9f2b4a8c1e6_*`). `ident`로 `reference_suas.ident`와 애플리케이션 레벨 조인.
+ADVISOR_SUAS_COLUMNS: dict[str, tuple[str, ...]] = {
+    "advisor_suas_schedule": ("ident", "eff_times_raw", "status", "segments", "generated_at"),
+}
+
 TABLE_WHITELIST: dict[str, tuple[str, ...]] = {
     **PROCESSED_COLUMNS,
     **REFERENCE_COLUMNS,
     **ADVISOR_ODR2_COLUMNS,
     **ADVISOR_FLOW_COLUMNS,
+    **ADVISOR_SUAS_COLUMNS,
     "ingestion_runs": INGESTION_RUNS_COLUMNS,
 }

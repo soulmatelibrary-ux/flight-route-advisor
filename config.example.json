@@ -40,7 +40,11 @@
     "shearModerate": "#e8590c",
     "shearStrong": "#d62828",
     "stcaCaution": "#f08c00",
-    "cpaPurple": "#8e24aa"
+    "cpaPurple": "#8e24aa",
+    "trafficLight": "#2e7d32",
+    "trafficModerate": "#e8590c",
+    "trafficHeavy": "#d62828",
+    "suas": "#5f3dc4"
   },
   "adsb": {
     "pollMs": 12000,
@@ -108,5 +112,10 @@
     "sampleMinPoints": 6,
     "sampleMaxPoints": 16,
     "sampleDegreesPerPoint": 3
+  },
+  "sectors": {
+    "trafficThresholds": [7, 12],
+    "trendDelta": 2,
+    "forecastMinutes": [10, 40]
   }
 }

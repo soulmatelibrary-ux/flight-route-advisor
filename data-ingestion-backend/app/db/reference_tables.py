@@ -1,8 +1,9 @@
 """정적 참조 데이터(공역·항공로·지점·SID/STAR) DB 테이블 정의 — 단일 출처.
 
-`processed_*`(운영 일자별 적재, run_id로 버전 구분)와는 성격이 다르다: 이 10개 테이블은
+`processed_*`(운영 일자별 적재, run_id로 버전 구분)와는 성격이 다르다: 이 12개 테이블은
 run_id/최신-run 윈도잉 없이 `scripts/migrate_static_reference_to_db.py`(기존 사전빌드_JSON
-7개 파일 → 6개 테이블, firs.json+firlbl.json이 `reference_fir` 하나로 병합됨)와
+7개 파일 → 8개 테이블, firs.json+firlbl.json이 `reference_fir` 하나로 병합되고
+acc_sectors.json이 `reference_acc_sector`+`reference_acc_boundary` 둘로 나뉨)와
 `scripts/ingest_jepp_nav.py`(Jeppesen SID/STAR/지점 CSV 4종 → 4개 테이블)가
 truncate-and-reload로 채우는 정적 마스터 데이터라 별도 프리픽스(`reference_*`)를 쓴다.
 컬럼은 모두 최종 조회에
@@ -165,6 +166,55 @@ reference_waypoint_terminal = sa.Table(
 )
 sa.Index("ix_reference_waypoint_terminal_id_region", reference_waypoint_terminal.c.waypoint_id, reference_waypoint_terminal.c.region_code)
 
+# --- ACC 관제섹터(docs/13 STEP A4 선행 — 사전빌드 acc_sectors.json, 한국(인천/대구 ACC)만
+# 커버하는 정적 데이터, docs/03 §3 acc-sectors). 원본 JSON은 {acc:{IN:[...],DG:[...]},
+# sectors:[[sectorId,nameEn,acc,flatCoords],...]} 모양 — 섹터 배정(analyzeFIR 이식,
+# point-in-polygon)에 실제로 쓰는 것은 sectors뿐이지만, 문서(03 §3)가 명시한 응답 스키마
+# `{acc,sectors}`를 그대로 지키기 위해 acc 경계도 별도 테이블로 함께 이관한다.
+
+reference_acc_sector = sa.Table(
+    "reference_acc_sector",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("sector_id", sa.Text, nullable=False),  # 예: "GH","GL","DG" — ACCS.sectors[i][0]
+    sa.Column("name_en", sa.Text),
+    sa.Column("acc", sa.Text, nullable=False),  # "IN"(인천) | "DG"(대구)
+    # 원본 순서 그대로(같은 다각형을 공유하는 GH/GL처럼 순서가 배정 결과에 영향 — analyzeFIR가
+    # 배열 순서대로 첫 매치에서 break하는 것을 그대로 재현하려면 순서 보존이 필수).
+    sa.Column("seq", sa.Integer, nullable=False),
+    sa.Column("polygon", JSONB, nullable=False),  # [[lat, lon], ...]
+)
+sa.Index("ix_reference_acc_sector_seq", reference_acc_sector.c.seq)
+
+reference_acc_boundary = sa.Table(
+    "reference_acc_boundary",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("acc", sa.Text, nullable=False),  # "IN" | "DG"
+    sa.Column("polygon", JSONB, nullable=False),  # [[lat, lon], ...] — ACC별 여러 폴리곤 중 하나
+)
+sa.Index("ix_reference_acc_boundary_acc", reference_acc_boundary.c.acc)
+
+# SUAS/MOA(특수공역) — `사전빌드_JSON/{suas,suas_world}.json`(완성본 빌드 파이프라인이 DAFIF
+# 원본(SUAS_PAR.TXT/SUAS.TXT, 세그먼트+SHAP 코드 6종)을 이미 폴리곤으로 풀어놓은 산출물, 원시
+# DAFIF 지오메트리를 이 앱이 다시 파싱하지 않는다)을 이관. 두 파일은 ident 기준 완전히
+# 겹치지 않는 별도 데이터(한국 240건 vs 세계 18,104건)라 `region`으로 태깅해 한 테이블에 합친다.
+# EFF_TIMES(발효시간) 컬럼은 이 폴리곤 산출물에 없다 — docs/13-ai-reasoning-dev-plan.md STEP A7
+# (AI 근거화, 별도 게이트) 소관이라 이번 이관 범위에서 제외.
+reference_suas = sa.Table(
+    "reference_suas",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("ident", sa.Text, nullable=False),
+    sa.Column("name", sa.Text),
+    sa.Column("type", sa.Text, nullable=False),  # 원본 코드 그대로(P/R/D/A/M/W/T 등), 임의 번역 안 함
+    sa.Column("upper", sa.Text),  # 원본 그대로("FL150"/"SURFACE"/"04500AMSL" 등 혼재, 정규화 안 함)
+    sa.Column("lower", sa.Text),
+    sa.Column("polygon", JSONB, nullable=False),  # [[lat, lon], ...]
+    sa.Column("region", sa.Text, nullable=False),  # 'kr' | 'world' — 원본 파일 출처
+)
+sa.Index("ix_reference_suas_region", reference_suas.c.region)
+
 REFERENCE_TABLES: dict[str, sa.Table] = {
     "reference_fir": reference_fir,
     "reference_tca": reference_tca,
@@ -176,4 +226,7 @@ REFERENCE_TABLES: dict[str, sa.Table] = {
     "reference_star": reference_star,
     "reference_waypoint_enroute": reference_waypoint_enroute,
     "reference_waypoint_terminal": reference_waypoint_terminal,
+    "reference_acc_sector": reference_acc_sector,
+    "reference_acc_boundary": reference_acc_boundary,
+    "reference_suas": reference_suas,
 }

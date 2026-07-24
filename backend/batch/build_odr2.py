@@ -14,11 +14,23 @@
 (참고: `사전빌드_JSON/odr2.json`에는 상층풍/ACDM 유래로 보이는 추가 필드가 더 있으나,
 그건 04-E(상층풍) 등 2단계 기능 소관이라 이 배치의 범위가 아니다 — docs/05 §3.)
 
+**터미널 신호 추가(A6, docs/13 STEP A6, 2026-07-24)**: `gate_in`/`gate_out`(경로그룹의 최빈
+진출입 게이트, `processed_flight_data.entry_fir`/`exit_fir`에서 — 컬럼명과 달리 실측상 FIR
+코드가 아니라 5자 픽스명, `advisor_odr2_route` 스칼라 컬럼 2개)·출발 활주로 분포(`processed_
+acdm_departure.runway`를 callsign=flight_icao·date=operation_date·dep=airport_icao 3중 키로
+조인 — 신규 조인, 리뷰에서 airport_icao 누락 시 편명 재사용에 값이 뒤섞일 수 있음이 지적돼
+추가함, 실측 매칭률 99.9%. 리스트라 route_fir/route_fix와 동일하게 `advisor_odr2_route_runway`
+자식 테이블로 — 완전 정규화 원칙). 원본
+완성본은 이 셋을 OD 단위 `odInfo`(rec[2])에 뒀지만([14 §8 C-2](../../docs/14-improvement-request.md)
+D20 확정에 따라) advisor는 **경로그룹 단위**로 노출한다 — 경로옵션마다 실제 진출입 게이트/
+활주로 분포가 다를 수 있어 OD 전체로 뭉치면 정보 손실이 있기 때문(doc13 STEP A6 스펙이
+이미 이 위치로 지정).
+
 읽기 전용 원칙(docs/02 §4.3): 이 배치의 산출물은 전처리 DB(`processed_*`)에 쓰지 않는다.
 대신 이 서비스 전용 신규 role `advisor_artifact_writer`(processed_*/raw_*/reference_*
-접근 권한 없음, data-ingestion-backend alembic `d4f7a91c3e26_*`)로만 `advisor_odr2_*`
-6개 테이블에 truncate-and-reload 한다(파일 아티팩트 `odr2.json`은 폐지, 2026-07-23
-사용자 요청으로 DB 통합). 조회 측(`app/queries/routes.py`)은 기존 읽기전용 role
+접근 권한 없음, data-ingestion-backend alembic `d4f7a91c3e26_*`/`c3e7a1f6b0d4_*`)로만
+`advisor_odr2_*` 7개 테이블에 truncate-and-reload 한다(파일 아티팩트 `odr2.json`은 폐지,
+2026-07-23 사용자 요청으로 DB 통합). 조회 측(`app/queries/routes.py`)은 기존 읽기전용 role
 (`advisor_readonly`)로 이 테이블을 SELECT한다.
 """
 
@@ -39,43 +51,34 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import artifact_session
+from app.db import column_map
 from app.db.session import get_engine
 from app.queries.latest_run import latest_view
 
-# --- advisor_odr2_* 6종 (경량 Core 프록시, 스키마 단일 출처는 data-ingestion-backend
-# alembic d4f7a91c3e26_*·column_map.ADVISOR_ODR2_COLUMNS) ---
-_ODR2_OD = sa.table(
-    "advisor_odr2_od",
-    sa.column("dep"), sa.column("arr"), sa.column("total_flights"),
-    sa.column("data_period"), sa.column("generated_at"),
-)
-_ODR2_ROUTE = sa.table(
-    "advisor_odr2_route",
-    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("flights"),
-    sa.column("avg_min"), sa.column("delay_count"), sa.column("heavy_count"),
-    sa.column("cruise_parity"),
-)
-_ODR2_ROUTE_FIR = sa.table(
-    "advisor_odr2_route_fir",
-    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"), sa.column("fir_icao"),
-)
-_ODR2_ROUTE_FIX = sa.table(
-    "advisor_odr2_route_fix",
-    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"), sa.column("fix_name"),
-)
-_ODR2_TRACK_POINT = sa.table(
-    "advisor_odr2_track_point",
-    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"),
-    sa.column("lat"), sa.column("lon"),
-)
-_ODR2_FULL_ROUTE_POINT = sa.table(
-    "advisor_odr2_full_route_point",
-    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"),
-    sa.column("lat"), sa.column("lon"),
-)
+
+def _proxy(table_name: str):
+    """`column_map.ADVISOR_ODR2_COLUMNS`를 단일 출처로 삼는 경량 Core 프록시.
+
+    컬럼명을 여기 다시 타이핑하면 alembic DDL(d4f7a91c3e26_*)이나 column_map이 바뀔 때
+    조용히 어긋날 수 있다(리뷰 지적사항, 2026-07-23) — 조회 측(`db/tables.py`)이 이미
+    이 화이트리스트로 리플렉션하듯, 쓰기 측도 같은 화이트리스트에서 컬럼명을 가져온다.
+    """
+    return sa.table(table_name, *(sa.column(c) for c in column_map.ADVISOR_ODR2_COLUMNS[table_name]))
+
+
+# --- advisor_odr2_* 7종 (스키마 단일 출처는 data-ingestion-backend alembic
+# d4f7a91c3e26_*/c3e7a1f6b0d4_*·column_map.ADVISOR_ODR2_COLUMNS) ---
+_ODR2_OD = _proxy("advisor_odr2_od")
+_ODR2_ROUTE = _proxy("advisor_odr2_route")
+_ODR2_ROUTE_FIR = _proxy("advisor_odr2_route_fir")
+_ODR2_ROUTE_FIX = _proxy("advisor_odr2_route_fix")
+_ODR2_ROUTE_RUNWAY = _proxy("advisor_odr2_route_runway")
+_ODR2_TRACK_POINT = _proxy("advisor_odr2_track_point")
+_ODR2_FULL_ROUTE_POINT = _proxy("advisor_odr2_full_route_point")
 _ODR2_TABLE_NAMES = (
     "advisor_odr2_full_route_point",
     "advisor_odr2_track_point",
+    "advisor_odr2_route_runway",
     "advisor_odr2_route_fix",
     "advisor_odr2_route_fir",
     "advisor_odr2_route",
@@ -106,14 +109,28 @@ def _teet_minutes(value: str | None) -> int | None:
     return int(m.group(1)) * 60 + int(m.group(2)) if m else None
 
 
-def aggregate(rows: list[dict[str, Any]]) -> tuple[dict, dict]:
-    """processed_flight_data 행들 → (agg, votes). 3_agg_csv.py의 집계 로직 그대로."""
+def aggregate(
+    rows: list[dict[str, Any]], runway_index: dict[tuple[str, str, str], str] | None = None
+) -> tuple[dict, dict]:
+    """processed_flight_data 행들 → (agg, votes). 3_agg_csv.py의 집계 로직 그대로.
+
+    `runway_index`(선택, docs/13 STEP A6): (callsign, date, dep) → runway. 3_agg_csv.py에는
+    없던 신규 집계(터미널 신호 이식) — 완성본 계산 스크립트가 이식 패키지 어디에도 없어
+    (A1/A2와 동일한 갭) processed_flight_data.entry_fir/exit_fir(진출입 게이트, 실측상
+    FIR 코드가 아니라 5자 픽스명 — 컬럼명은 오해의 소지가 있으나 물리 스키마 그대로)와
+    processed_acdm_departure.runway(callsign=flight_icao·date=operation_date·dep=airport_icao
+    3중 키 조인, `_fetch_acdm_departure_runways()` 참고 — 이 저장소에 기존 전례가 있는
+    조인이 아니라 이번에 새로 검증한 조인)로 직접 계산했다."""
     agg: dict[tuple[str, str], dict[tuple[str, str], dict]] = defaultdict(
         lambda: defaultdict(
-            lambda: {"n": 0, "tsum": 0, "tn": 0, "dly": 0, "hv": 0, "pO": 0, "pE": 0, "fr": defaultdict(int)}
+            lambda: {
+                "n": 0, "tsum": 0, "tn": 0, "dly": 0, "hv": 0, "pO": 0, "pE": 0, "fr": defaultdict(int),
+                "gi": defaultdict(int), "go": defaultdict(int), "rwy": defaultdict(int),
+            }
         )
     )
     votes: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    runway_index = runway_index or {}
 
     total_rows = 0
     used = 0
@@ -164,6 +181,15 @@ def aggregate(rows: list[dict[str, Any]]) -> tuple[dict, dict]:
         fr = (r["full_route"] or "").strip()
         if fr and len(fr) < 2000:
             e["fr"][fr] += 1
+        gi = (r["entry_fir"] or "").strip()
+        if gi:
+            e["gi"][gi] += 1
+        go = (r["exit_fir"] or "").strip()
+        if go:
+            e["go"][go] += 1
+        rwy = runway_index.get(((r["callsign"] or "").strip(), (r["date"] or "")[:10], dep))
+        if rwy:
+            e["rwy"][rwy] += 1
 
     out: dict[str, dict] = {}
     for (dep, dst), groups in agg.items():
@@ -172,6 +198,21 @@ def aggregate(rows: list[dict[str, Any]]) -> tuple[dict, dict]:
             v = dict(v)
             frc = v.pop("fr")
             v["fr"] = max(frc.items(), key=lambda x: x[1])[0] if frc else ""
+            # 진출입 게이트(최빈값, A6) — 동률이면 max()가 먼저 나온 키를 고르는데, dict
+            # 삽입 순서(=처음 관측된 순서)를 그대로 따르므로 다른 최빈값 처리(fr)와 동일한
+            # 결정성 특성을 가진다(재실행해도 같은 결과).
+            gi_counts, go_counts, rwy_counts = v.pop("gi"), v.pop("go"), v.pop("rwy")
+            v["gate_in"] = max(gi_counts.items(), key=lambda x: x[1])[0] if gi_counts else None
+            v["gate_out"] = max(go_counts.items(), key=lambda x: x[1])[0] if go_counts else None
+            rwy_total = sum(rwy_counts.values())
+            v["runway_dist"] = (
+                sorted(
+                    ([rwy, round(100 * cnt / rwy_total)] for rwy, cnt in rwy_counts.items()),
+                    key=lambda pair: -pair[1],
+                )
+                if rwy_total
+                else []
+            )
             o[k[0] + "§" + k[1]] = v
         out[f"{dep}|{dst}"] = o
 
@@ -369,7 +410,10 @@ def build_odr2(
             if len(frc) < 6:
                 frc = []
             par = "O" if e.get("pO", 0) > e.get("pE", 0) else ("E" if e.get("pE", 0) > e.get("pO", 0) else "")
-            routes.append([e["n"], avg, e["dly"], e["hv"], seq, oknames, track, frc, par])
+            routes.append([
+                e["n"], avg, e["dly"], e["hv"], seq, oknames, track, frc, par,
+                e.get("gate_in"), e.get("gate_out"), e.get("runway_dist", []),
+            ])
             n_routes += 1
         if routes:
             odr2[od] = [total, routes]
@@ -382,7 +426,39 @@ def build_odr2(
 
 _FLIGHT_DATA_COLUMNS = (
     "date", "dept", "dest", "fir_enroute", "ext_route", "teet", "eobt", "atd", "a_type", "rfl", "full_route",
+    # 터미널 신호(A6) — 진출입 게이트 조인 키 불필요(같은 행에 이미 있음), 활주로 분포는
+    # callsign+date로 processed_acdm_departure와 조인(아래 _fetch_acdm_departure_runways).
+    "callsign", "entry_fir", "exit_fir",
 )
+
+
+def _fetch_acdm_departure_runways() -> dict[tuple[str, str, str], str]:
+    """(callsign, date, dep) → 출발 활주로. processed_acdm_departure 최신본에서(docs/13 STEP A6).
+
+    조인 키(callsign=flight_icao, date=operation_date, dep=airport_icao)로 processed_flight_data
+    행과 매칭 — 실측 확인(2026-07-24): RKSI→RJBB 1,209편 중 1,208편이 매칭됨(runway 결측 1건
+    제외 전부). **airport_icao(dep)를 키에 반드시 포함**해야 한다(리뷰 지적, 2026-07-24) —
+    같은 편명이 같은 날 다른 공항에서 출발하는 경우(예: 회항 후 재출발, 코드셰어 재사용)
+    airport_icao 없이는 서로 다른 두 항공편의 활주로가 조용히 뒤섞인다. `id` 순 정렬은
+    `_fetch_flight_data_rows()`와 동일한 이유(동률 키 발생 시 재실행해도 항상 같은 값이
+    이기도록 — 정렬 없이 dict 컴프리헨션만 쓰면 DB가 반환하는 행 순서에 따라 승자가
+    실행마다 달라질 수 있다)."""
+    stmt = latest_view("processed_acdm_departure")
+    sub = stmt.subquery()
+    try:
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                select(sub.c.flight_icao, sub.c.operation_date, sub.c.airport_icao, sub.c.runway, sub.c.id)
+                .where(sub.c.runway.is_not(None))
+                .order_by(sub.c.id)
+            ).all()
+    except Exception as exc:
+        raise RuntimeError(f"processed_acdm_departure 조회 실패: {exc}") from exc
+    index: dict[tuple[str, str, str], str] = {}
+    for flight_icao, operation_date, airport_icao, runway, _id in rows:
+        if flight_icao and airport_icao:
+            index[(flight_icao, operation_date, airport_icao)] = runway
+    return index
 
 
 def _fetch_flight_data_rows() -> list[dict[str, Any]]:
@@ -415,7 +491,8 @@ def _data_period(rows: list[dict[str, Any]]) -> str | None:
 
 
 def _persist(odr2: dict[str, list], data_period: str | None) -> None:
-    """odr2 dict(§4.2 스키마 그대로)를 `advisor_odr2_*` 6종에 truncate-and-reload 한다.
+    """odr2 dict(§4.2 스키마 그대로)를 `advisor_odr2_*` 7종(A6가 추가한 route_runway 포함)에
+    truncate-and-reload 한다.
 
     이 배치는 매번 `processed_flight_data` 전체를 다시 집계하는 전체 재계산이지
     증분(append)이 아니므로, 예전 파일 아티팩트를 통째로 덮어쓰던 것과 동일하게
@@ -428,6 +505,7 @@ def _persist(odr2: dict[str, list], data_period: str | None) -> None:
     route_rows: list[dict[str, Any]] = []
     fir_rows: list[dict[str, Any]] = []
     fix_rows: list[dict[str, Any]] = []
+    runway_rows: list[dict[str, Any]] = []
     track_rows: list[dict[str, Any]] = []
     frc_rows: list[dict[str, Any]] = []
 
@@ -438,15 +516,20 @@ def _persist(odr2: dict[str, list], data_period: str | None) -> None:
             "data_period": data_period, "generated_at": generated_at,
         })
         for rank, route in enumerate(routes):
-            n, avg_min, delay_count, heavy_count, firs, pixes, track, frc, parity = route
+            n, avg_min, delay_count, heavy_count, firs, pixes, track, frc, parity, gate_in, gate_out, runway_dist = route
             route_rows.append({
                 "dep": dep, "arr": arr, "rank": rank, "flights": n, "avg_min": avg_min,
                 "delay_count": delay_count, "heavy_count": heavy_count, "cruise_parity": parity,
+                "gate_in": gate_in, "gate_out": gate_out,
             })
             for seq, fir_icao in enumerate(firs):
                 fir_rows.append({"dep": dep, "arr": arr, "rank": rank, "seq": seq, "fir_icao": fir_icao})
             for seq, fix_name in enumerate(pixes):
                 fix_rows.append({"dep": dep, "arr": arr, "rank": rank, "seq": seq, "fix_name": fix_name})
+            # 출발 활주로 분포(A6) — 리스트라 route_fir/route_fix와 동일하게 자식 테이블로
+            # (완전 정규화 원칙, JSONB 블롭 대신).
+            for seq, (runway, pct) in enumerate(runway_dist):
+                runway_rows.append({"dep": dep, "arr": arr, "rank": rank, "seq": seq, "runway": runway, "pct": pct})
             for i in range(0, len(track), 2):
                 track_rows.append({
                     "dep": dep, "arr": arr, "rank": rank, "seq": i // 2,
@@ -469,6 +552,8 @@ def _persist(odr2: dict[str, list], data_period: str | None) -> None:
             conn.execute(sa.insert(_ODR2_ROUTE_FIR), fir_rows)
         if fix_rows:
             conn.execute(sa.insert(_ODR2_ROUTE_FIX), fix_rows)
+        if runway_rows:
+            conn.execute(sa.insert(_ODR2_ROUTE_RUNWAY), runway_rows)
         if track_rows:
             conn.execute(sa.insert(_ODR2_TRACK_POINT), track_rows)
         if frc_rows:
@@ -478,7 +563,8 @@ def _persist(odr2: dict[str, list], data_period: str | None) -> None:
 def run() -> dict:
     rows = _fetch_flight_data_rows()
     data_period = _data_period(rows)
-    agg, votes = aggregate(rows)
+    runway_index = _fetch_acdm_departure_runways()
+    agg, votes = aggregate(rows, runway_index)
 
     # FIR 아티팩트 로드 (경로 상수화, 파일 검증 추가)
     try:

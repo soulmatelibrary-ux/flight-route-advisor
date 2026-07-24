@@ -24,6 +24,14 @@ def _table(name: str):
     return tables.get_table(name)
 
 
+def _repeatable_read_connect():
+    """`queries/routes.py._repeatable_read_connect()`와 동일한 이유 —
+    od/reason/limit/measure/hour/route_group 순차 조회가 배치 재적재 중간에 걸리면
+    한 응답 안에 신·구 세대 데이터가 섞일 수 있어 REPEATABLE READ로 스냅샷을 고정한다
+    (리뷰 지적사항, 2026-07-23)."""
+    return get_engine().connect().execution_options(isolation_level="REPEATABLE READ")
+
+
 def _ensure_built(conn) -> None:
     t = _table("advisor_flow_od")
     exists = conn.execute(select(t.c.dep).limit(1)).first()
@@ -33,15 +41,8 @@ def _ensure_built(conn) -> None:
         )
 
 
-def data_period() -> str | None:
-    t = _table("advisor_flow_od")
-    with get_engine().connect() as conn:
-        row = conn.execute(select(t.c.data_period).limit(1)).first()
-    return row[0] if row else None
-
-
-def flow_for(dep: str, arr: str) -> dict[str, Any]:
-    """OD 하나의 흐름관리 영향 요약 + 그 OD의 경로그룹별 영향률(route_group 서브셋).
+def flow_for(dep: str, arr: str) -> tuple[dict[str, Any], str | None]:
+    """OD 하나의 흐름관리 영향 요약 + 그 OD의 경로그룹별 영향률(route_group 서브셋) + data_period.
 
     기록 부족(od에 행 없음)은 예외가 아니라 `found: false`로 반환한다
     (docs/13 STEP A1 수용기준: 미기록 OD는 404 아님 "기록 부족" 처리).
@@ -53,8 +54,11 @@ def flow_for(dep: str, arr: str) -> dict[str, Any]:
     hour_t = _table("advisor_flow_od_hour")
     group_t = _table("advisor_flow_route_group")
 
-    with get_engine().connect() as conn:
+    with _repeatable_read_connect() as conn, conn.begin():
         _ensure_built(conn)
+
+        period_row = conn.execute(select(od_t.c.data_period).limit(1)).first()
+        period = period_row[0] if period_row else None
 
         routes = {
             route_key: pct
@@ -73,7 +77,7 @@ def flow_for(dep: str, arr: str) -> dict[str, Any]:
         ).first()
 
         if od_row is None:
-            return {"dep": dep, "arr": arr, "found": False, "routes": routes}
+            return {"dep": dep, "arr": arr, "found": False, "routes": routes}, period
 
         (
             impact_pct, affected_flights, total_flights,
@@ -116,7 +120,7 @@ def flow_for(dep: str, arr: str) -> dict[str, Any]:
         -1 if hour_by_hour.get(hour) is None else hour_by_hour[hour] for hour in range(24)
     ]
 
-    return {
+    data = {
         "dep": dep,
         "arr": arr,
         "found": True,
@@ -133,3 +137,4 @@ def flow_for(dep: str, arr: str) -> dict[str, Any]:
         "hour_impact_pct": hour_impact_pct,
         "routes": routes,
     }
+    return data, period

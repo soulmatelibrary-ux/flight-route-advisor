@@ -129,6 +129,66 @@ def fetch_waypoints() -> list[list]:
     return _cache["waypoints"]
 
 
+def fetch_acc_sectors() -> list[tuple[str, str, str, list[list[float]]]]:
+    """[(sector_id, name_en, acc, polygon[[lat,lon],...]), ...] — seq 오름차순(원본 배열 순서,
+    docs/13 STEP A4가 요구하는 point-in-polygon 첫-매치 순서 보존)."""
+    if "acc_sectors" not in _cache:
+        t = _table("reference_acc_sector")
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                select(t.c.sector_id, t.c.name_en, t.c.acc, t.c.polygon).order_by(t.c.seq)
+            ).all()
+        _cache["acc_sectors"] = [(sid, name_en, acc, polygon) for sid, name_en, acc, polygon in rows]
+    return _cache["acc_sectors"]
+
+
+def fetch_acc_boundaries() -> list[tuple[str, list[list[float]]]]:
+    """[(acc, polygon[[lat,lon],...]), ...] — acc_sectors.json의 `acc` 키(ACC 경계, 여러 폴리곤)."""
+    if "acc_boundaries" not in _cache:
+        t = _table("reference_acc_boundary")
+        with get_engine().connect() as conn:
+            rows = conn.execute(select(t.c.acc, t.c.polygon)).all()
+        _cache["acc_boundaries"] = [(acc, polygon) for acc, polygon in rows]
+    return _cache["acc_boundaries"]
+
+
+def fetch_suas() -> list[dict]:
+    """[{ident, name, type, upper, lower, polygon:[[lat,lon],...], region}, ...] — 전체(한국+세계),
+    region/bbox 필터는 loader.py가 담당(다른 fetch_* 함수와 동일 관례, 캐시는 필터 전 전체 1벌)."""
+    if "suas" not in _cache:
+        t = _table("reference_suas")
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                select(t.c.ident, t.c.name, t.c.type, t.c.upper, t.c.lower, t.c.polygon, t.c.region)
+            ).all()
+        _cache["suas"] = [
+            {
+                "ident": ident, "name": name, "type": type_,
+                "upper": upper, "lower": lower, "polygon": polygon, "region": region,
+            }
+            for ident, name, type_, upper, lower, polygon, region in rows
+        ]
+    return _cache["suas"]
+
+
+def fetch_suas_schedule() -> dict[str, dict]:
+    """ident → {eff_times_raw, status, segments}. `advisor_suas_schedule`(A7, docs/13 STEP A7 —
+    advisor 소유 파생 배치 `backend/batch/build_suas.py`) 조회. `reference_suas`와는 스키마
+    소유가 달라(별도 세션 소유 vs advisor 소유) FK 없이 `ident` 문자열로 애플리케이션 레벨
+    조인한다(loader.py:load_suas). 이 배치를 아직 안 돌렸으면 테이블이 비어 빈 dict 반환
+    (에러 아님 — doc13 STEP A7 수용기준 (3) "SUAS 참조 레이어 미포팅 시 조용히 스킵"과
+    동일한 정신으로, 이 배치 미실행 시에도 SUAS 자체는 스케줄 없이 정상 표시돼야 함)."""
+    if "suas_schedule" not in _cache:
+        t = _table("advisor_suas_schedule")
+        with get_engine().connect() as conn:
+            rows = conn.execute(select(t.c.ident, t.c.eff_times_raw, t.c.status, t.c.segments)).all()
+        _cache["suas_schedule"] = {
+            ident: {"eff_times_raw": eff_times_raw, "status": status, "segments": segments}
+            for ident, eff_times_raw, status, segments in rows
+        }
+    return _cache["suas_schedule"]
+
+
 # --- SID/STAR fix 좌표 해석 (승인된 계획 "핵심 설계 결정 3" 그대로) ---
 
 
