@@ -1,99 +1,130 @@
-"""ODR2 아티팩트 서빙 (docs/03-backend-api.md §4.1). `batch/build_odr2.py` 산출물을
-읽기만 한다 — 요청마다 재계산하지 않는다(docs/02 §4.3).
+"""ODR2 DB 조회 (docs/03-backend-api.md §4.1, MVP 유일 운항 API).
+
+`backend/batch/build_odr2.py`가 `advisor_odr2_*` 6종에 적재한 결과를 읽기전용 role
+(`advisor_readonly`)로 조회한다(예전 파일 아티팩트 `odr2.json` 읽기를 대체, 2026-07-23
+DB 통합). 반환 dict 모양은 예전 파일 기반 버전과 동일하게 유지해 `routers/routes.py`·
+프론트는 무변경으로 둔다.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from collections import defaultdict
 from typing import Any
 
-_ARTIFACT_PATH = Path(__file__).resolve().parent.parent / "reference" / "artifacts" / "odr2.json"
-_META_PATH = _ARTIFACT_PATH.with_name(_ARTIFACT_PATH.stem + "_meta.json")
+from sqlalchemy import select
 
-_cache: dict[str, Any] | None = None
-_meta_cache: dict[str, Any] | None = None
-
-
-def _load() -> dict[str, Any]:
-    global _cache
-    if _cache is None:
-        if not _ARTIFACT_PATH.exists():
-            raise FileNotFoundError(
-                f"{_ARTIFACT_PATH} 없음 — 먼저 `python -m batch.build_odr2` 실행 필요"
-            )
-        with _ARTIFACT_PATH.open(encoding="utf-8") as f:
-            _cache = json.load(f)
-    return _cache
+from app.db import tables
+from app.db.session import get_engine
 
 
-def _load_meta() -> dict[str, Any]:
-    """odr2_meta.json(batch/build_odr2.py._data_period 산출) — 없으면 빈 dict(구버전
-    아티팩트 호환, data_period는 그냥 null로 응답)."""
-    global _meta_cache
-    if _meta_cache is None:
-        if _META_PATH.exists():
-            with _META_PATH.open(encoding="utf-8") as f:
-                _meta_cache = json.load(f)
-        else:
-            _meta_cache = {}
-    return _meta_cache
+class Odr2NotBuiltError(RuntimeError):
+    """`advisor_odr2_od`가 비어 있음 — `python -m batch.build_odr2`가 아직 한 번도 안 돌았음."""
+
+
+def _table(name: str):
+    return tables.get_table(name)
+
+
+def _ensure_built(conn) -> None:
+    t = _table("advisor_odr2_od")
+    exists = conn.execute(select(t.c.dep).limit(1)).first()
+    if exists is None:
+        raise Odr2NotBuiltError(
+            "advisor_odr2_od 비어 있음 — 먼저 `python -m batch.build_odr2` 실행 필요"
+        )
 
 
 def data_period() -> str | None:
-    """이 ODR2 아티팩트가 실제로 집계한 날짜 범위(docs/03 §2 data_period). run_id는
-    "일자별 최신 run 우선" 윈도우 특성상 날짜별로 승자 run이 다를 수 있어 단일 값으로
-    환원할 수 없으므로 null로 둔다(참조 데이터와 동일하게 처리, docs/03 §2)."""
-    return _load_meta().get("data_period")
-
-
-def reset_cache() -> None:
-    """새 아티팩트가 생성된 뒤(재배치) 다음 요청에 다시 읽게 한다."""
-    global _cache, _meta_cache
-    _cache = None
-    _meta_cache = None
-
-
-def _to_pairs(flat: list[float]) -> list[list[float]]:
-    return [[flat[i], flat[i + 1]] for i in range(0, len(flat), 2)]
-
-
-def _shape_option(route: list) -> dict[str, Any]:
-    n, avg_min, delay_count, heavy_count, firs, pixes, track, frc, parity = route
-    return {
-        "flights": n,
-        "avg_min": avg_min,
-        "delay_count": delay_count,
-        "heavy_count": heavy_count,
-        "enroute_firs": firs,
-        "incheon_track_fixes": pixes,
-        "track_coords": _to_pairs(track),
-        "full_route_coords": _to_pairs(frc),
-        "cruise_parity": parity,
-    }
+    """모든 OD 행이 같은 배치 실행에서 나온 값을 공유하므로 아무 한 행이나 읽으면 된다."""
+    t = _table("advisor_odr2_od")
+    with get_engine().connect() as conn:
+        row = conn.execute(select(t.c.data_period).limit(1)).first()
+    return row[0] if row else None
 
 
 def od_pairs() -> list[dict[str, Any]]:
     """출발/도착 OD 쌍 목록, 편수순(docs §4.1 od-pairs)."""
-    odr2 = _load()
-    rows = []
-    for od, (total, _routes) in odr2.items():
-        dep, arr = od.split("|")
-        rows.append({"dep": dep, "arr": arr, "total_flights": total})
-    rows.sort(key=lambda r: -r["total_flights"])
-    return rows
+    t = _table("advisor_odr2_od")
+    with get_engine().connect() as conn:
+        _ensure_built(conn)
+        rows = conn.execute(
+            select(t.c.dep, t.c.arr, t.c.total_flights).order_by(t.c.total_flights.desc())
+        ).all()
+    return [{"dep": dep, "arr": arr, "total_flights": total} for dep, arr, total in rows]
 
 
 def routes_for(dep: str, arr: str) -> dict[str, Any] | None:
     """특정 OD의 경로옵션 목록(docs §4.1 응답 예시 형태). 없으면 None."""
-    odr2 = _load()
-    entry = odr2.get(f"{dep}|{arr}")
-    if entry is None:
-        return None
-    total, routes = entry
-    return {
-        "dep": dep,
-        "arr": arr,
-        "total_flights": total,
-        "options": [_shape_option(r) for r in routes],
-    }
+    od_t = _table("advisor_odr2_od")
+    route_t = _table("advisor_odr2_route")
+    fir_t = _table("advisor_odr2_route_fir")
+    fix_t = _table("advisor_odr2_route_fix")
+    track_t = _table("advisor_odr2_track_point")
+    frc_t = _table("advisor_odr2_full_route_point")
+
+    with get_engine().connect() as conn:
+        _ensure_built(conn)
+
+        od_row = conn.execute(
+            select(od_t.c.total_flights).where(od_t.c.dep == dep, od_t.c.arr == arr)
+        ).first()
+        if od_row is None:
+            return None
+        total_flights = od_row[0]
+
+        route_rows = conn.execute(
+            select(
+                route_t.c.rank, route_t.c.flights, route_t.c.avg_min, route_t.c.delay_count,
+                route_t.c.heavy_count, route_t.c.cruise_parity,
+            )
+            .where(route_t.c.dep == dep, route_t.c.arr == arr)
+            .order_by(route_t.c.rank)
+        ).all()
+
+        firs_by_rank: dict[int, list[str]] = defaultdict(list)
+        for rank, fir_icao in conn.execute(
+            select(fir_t.c.rank, fir_t.c.fir_icao)
+            .where(fir_t.c.dep == dep, fir_t.c.arr == arr)
+            .order_by(fir_t.c.rank, fir_t.c.seq)
+        ):
+            firs_by_rank[rank].append(fir_icao)
+
+        fixes_by_rank: dict[int, list[str]] = defaultdict(list)
+        for rank, fix_name in conn.execute(
+            select(fix_t.c.rank, fix_t.c.fix_name)
+            .where(fix_t.c.dep == dep, fix_t.c.arr == arr)
+            .order_by(fix_t.c.rank, fix_t.c.seq)
+        ):
+            fixes_by_rank[rank].append(fix_name)
+
+        track_by_rank: dict[int, list[list[float]]] = defaultdict(list)
+        for rank, lat, lon in conn.execute(
+            select(track_t.c.rank, track_t.c.lat, track_t.c.lon)
+            .where(track_t.c.dep == dep, track_t.c.arr == arr)
+            .order_by(track_t.c.rank, track_t.c.seq)
+        ):
+            track_by_rank[rank].append([lat, lon])
+
+        frc_by_rank: dict[int, list[list[float]]] = defaultdict(list)
+        for rank, lat, lon in conn.execute(
+            select(frc_t.c.rank, frc_t.c.lat, frc_t.c.lon)
+            .where(frc_t.c.dep == dep, frc_t.c.arr == arr)
+            .order_by(frc_t.c.rank, frc_t.c.seq)
+        ):
+            frc_by_rank[rank].append([lat, lon])
+
+    options = [
+        {
+            "flights": flights,
+            "avg_min": avg_min,
+            "delay_count": delay_count,
+            "heavy_count": heavy_count,
+            "enroute_firs": firs_by_rank.get(rank, []),
+            "incheon_track_fixes": fixes_by_rank.get(rank, []),
+            "track_coords": track_by_rank.get(rank, []),
+            "full_route_coords": frc_by_rank.get(rank, []),
+            "cruise_parity": cruise_parity,
+        }
+        for rank, flights, avg_min, delay_count, heavy_count, cruise_parity in route_rows
+    ]
+    return {"dep": dep, "arr": arr, "total_flights": total_flights, "options": options}

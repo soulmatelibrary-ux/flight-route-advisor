@@ -11,6 +11,10 @@
 const DEFAULT_CONFIG = {
   apiBaseUrl: "/api",
   weatherProxyUrl: "http://localhost:3000/proxy",
+  // 외부 API fetch 공통 타임아웃(net.js) — 응답 없는 요청이 무한정 pending 상태로 남아
+  // 호출부의 동시실행 가드(예: layers/adsb.js의 routeCodesBusy)를 영구히 잠그는 문제 방지
+  // (리뷰 지적, 2026-07-23). 완성본 PORTING_PACKAGE_ROOT도 개별 fetch에 6000ms를 씀.
+  netTimeoutMs: 8000,
   tileUrl: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
   map: {
     center: [30, 127],
@@ -47,6 +51,12 @@ const DEFAULT_CONFIG = {
     // 아예 안 붙인다 — 1~2편짜리 표본에서 지연 1건이 "100%·혼잡"으로 과장돼 보이는
     // 문제(사용자 확정, 2026-07-23) 방지. route-panel.js에서 사용.
     minSampleForCongestionTag: 5,
+    // 경로 1(baseline) 대비 다른 옵션이 "달라진 구간"으로 판정되는 근접 임계(NM, 사용자
+    // 요청 2026-07-23 — route.js splitByBaseline). 레이더 트랙 좌표는 이름 붙은 픽스가
+    // 아니라 표본점이라 정확한 경로 일치 판정 대신 근접도로 근사한다. 항로 측면 분리
+    // 기준(수 NM)보다 넉넉히 잡아 트랙 표본 잡음으로 인한 오탐(공유 구간을 "다름"으로
+    // 잘못 표시)을 줄인다.
+    routeDiffThresholdNm: 20,
   },
   tokens: {
     ink: "#22303c",
@@ -56,15 +66,35 @@ const DEFAULT_CONFIG = {
     blue: "#1d5fae",
     // SID/STAR(원본 문서/08 §SS: 파랑=SID, 녹색=STAR) 전용
     green: "#2e8b57",
+    // SIGMET(위험기상) 전용 — orange는 이미 경로 경유 FIR 하이라이트(route.js)·미니맵
+    // 뷰포트 표시에 쓰여 위험기상을 켜면 구분이 안 된다는 피드백(2026-07-23)으로 분리.
+    hazardRed: "#c92a2a",
+    // 경로 1(baseline) 대비 다른 옵션이 갈라지는 구간 전용(사용자 요청, 2026-07-23) —
+    // hazardRed와 같은 "경고" 계열이지만 하나는 면(SIGMET 폴리곤), 하나는 선(경로 diff)이라
+    // 실제로 겹쳐 보일 일은 없다. 그래도 의미가 다르므로 별도 토큰으로 분리.
+    routeDiffRed: "#e03131",
     // 항공기 실루엣(완성본 FR24 스타일 이식, PORTING_PACKAGE_ROOT 참고) 전용
     aircraftYellow: "#f7c440",
     aircraftGround: "#aeb7bf",
     aircraftOutline: "#4a5560",
     aircraftHalo: "rgba(255,255,255,0.95)",
+    // 상층풍 연직시어(A3) 전용 — orange/hazardRed와 별개 토큰(2026-07-23 SIGMET 색상충돌
+    // 교훈과 동일한 이유: 경로선 위에 그려지는 시어 색이 다른 레이어와 의미가 섞이면 안 됨)
+    shearWeak: "#2e7d32",
+    shearModerate: "#e8590c",
+    shearStrong: "#d62828",
+    // 근접 경고(STCA) "주의"(10NM/5,000ft) 전용 — "경고"(5NM/2,000ft)는 hazardRed 재사용
+    // (완성본도 위험색 하나를 severity 구분 없이 그대로 씀, 여기선 orange와 시각 충돌
+    // 방지를 위해 별도 amber 톤 신설). 동고도 조우 예측(CPA) 선택 쌍 강조는 cpaPurple
+    // (완성본 ctx.strokeStyle='#8e24aa'와 동일, PORTING_PACKAGE_ROOT 이식 2026-07-23).
+    stcaCaution: "#f08c00",
+    cpaPurple: "#8e24aa",
   },
   adsb: {
     pollMs: 12000,
-    radiusNm: 250,
+    // 지도 중심/노선 표본 지점 기준 조회 반경. 250NM은 너무 멀리까지 잡혀 노선과 무관한
+    // 항공기가 다수 표시된다는 피드백(사용자 요청, 2026-07-23) — 100NM으로 축소.
+    radiusNm: 100,
     // 화이트리스트(기상서버 07 문서 §4 프록시 화이트리스트와 정합) — 순서대로 폴백 시도
     endpoints: [
       "https://api.adsb.lol/v2/point/{lat}/{lon}/{radiusNm}",
@@ -77,6 +107,29 @@ const DEFAULT_CONFIG = {
     routeCodeLookupUrl: "https://api.adsb.lol/api/0/route/{callsign}",
     routeCodeBatchSize: 12, // 폴링 사이클당 조회할 편명 수 상한(무료 API 부하 제한)
     routeCodeBatchDelayMs: 250, // 배치 내 요청 간 간격
+    // 노선 선택 시 표본 조회 지점 수 상한(리뷰 지적으로 CONFIG.adsb 이동, 2026-07-23 —
+    // 이전엔 adsb.js 모듈 상수로 하드코딩돼 있었음). layers/adsb.js의 sampleRoutePoints
+    // 참고.
+    routeSampleMaxPoints: 6,
+    // 근접 경고(STCA)·동고도 조우 예측(CPA) 임계값 — 완성본 PORTING_PACKAGE_ROOT의
+    // detectStca() 수치를 그대로 이식(2026-07-23, 사용자 요청). 하드코딩 금지 원칙상
+    // layers/adsb.js에 매직넘버로 두지 않고 여기로 뺌.
+    stca: {
+      minAltFt: 18000, // FL180 초과 항공기만 후보(완성본과 동일)
+      cautionNm: 10, // 주의: 수평 10NM 이내
+      cautionAltFt: 5000, // 주의: 고도차 5,000ft 미만
+      warnNm: 5, // 경고: 수평 5NM 이내
+      warnAltFt: 2000, // 경고: 고도차 2,000ft 미만
+      closingEpsilonNm: 0.05, // "접근 중" 판정 — 직전 폴링 대비 이 값 이상 좁혀졌으면 closing
+    },
+    cpa: {
+      lookaheadMin: 15, // 15분 내 최근접시각(CPA)만 대상
+      minLeadSec: 30, // 30초 미만은 사실상 지금 상황(STCA)이라 CPA 목록에서 제외
+      maxNm: 8, // CPA 시점 수평거리 8NM 이내만 "조우"로 인정
+      maxAltFt: 1000, // CPA 시점 예측 고도차 1,000ft 미만
+      minGsKt: 80, // 지상속도 80kt 미만(지상 활주 등)은 제외
+      minClosingKt: 10, // 상대속도 10kt 미만(거의 평행비행)은 제외
+    },
   },
   weather: {
     // 지도의 AWC 호출 폴백 체인(직접 → 로컬 프록시 → 공개 프록시), 성공 경로 기억(문서 03/05/07)
@@ -107,6 +160,28 @@ const DEFAULT_CONFIG = {
     playIntervalMs: 500,
   },
   externalApis: {},
+  // 경로 상층풍·연직시어·추천고도(A3, docs/13 STEP A3) — 완성본과 동일 소스(Open-Meteo GFS).
+  wind: {
+    apiUrl: "https://api.open-meteo.com/v1/gfs",
+    // 기압면 앵커(완성본 WLVLS/FLANCH 그대로) — 인접 두 앵커 사이는 벡터 보간.
+    levels: [
+      { pressure: "700hPa", fl: 100 },
+      { pressure: "500hPa", fl: 180 },
+      { pressure: "400hPa", fl: 240 },
+      { pressure: "300hPa", fl: 300 },
+      { pressure: "250hPa", fl: 340 },
+      { pressure: "200hPa", fl: 390 },
+    ],
+    flOdd: [290, 310, 330, 350, 370, 390], // 동행(자방위 000~179°) 순항고도 후보
+    flEven: [280, 300, 320, 340, 360, 380], // 서행(180~359°) 순항고도 후보
+    flLow: [100, 180, 240], // 저고도(참고용, 추천 후보 아님)
+    tasKt: 460, // 진대기속도 가정치(완성본과 동일 — 배풍/정풍에 따른 소요시간 변화 계산용)
+    shearModerateKt1000ft: 4, // 이 값 초과면 "보통", shearStrongKt1000ft 초과면 "강함 가능"
+    shearStrongKt1000ft: 7, // 추천고도 선정 시 이 값 이하만 "안전 후보"로 고려
+    sampleMinPoints: 6,
+    sampleMaxPoints: 16,
+    sampleDegreesPerPoint: 3, // 경로 표본지점 수 = clamp(round(총거리(도)/3), min, max)
+  },
 };
 
 function isPlainObject(value) {

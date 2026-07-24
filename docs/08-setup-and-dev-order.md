@@ -16,6 +16,7 @@
 | `SOURCE_PROJECT_ROOT` | `<PROJECT>/result/데이터전처리기술이식` | 스킬 `skills/`, 원본데이터(`ACDM/·FOIS/·비행자료/·흐름관리일지/·공간데이터/`), `outputs/`, `data-ingestion-backend/` |
 | `PORTING_PACKAGE_ROOT` | `<PROJECT>/result/비행경로추천서비스_이식패키지` | 참조 지오메트리 `사전빌드_JSON/`, 기상서버 `기상서버/`, 집계 스크립트 `전처리스크립트/`, 원본 기능/알고리즘 문서 `문서/03·04·07·08` |
 | `DATABASE_URL` | `postgresql://…@localhost:5432/aviation` | 로컬 PostgreSQL (advisor는 읽기 전용 role) |
+| `ADVISOR_ARTIFACT_DATABASE_URL` | `postgresql://advisor_artifact_writer:…@localhost:5432/aviation` | odr2/flow 배치(`backend/batch/{build_odr2,build_flow}.py`) 전용 쓰기 접속(2026-07-23, [02 §4.3·§6](./02-db-integration.md)) — API 프로세스는 참조하지 않음, 배치 실행 시에만 필요 |
 | `WEATHER_PROXY_URL` | `http://localhost:3000/proxy` | 기상서버 CORS 프록시 |
 
 - `<PROJECT>` = 이 저장소들의 상위(예 `/Users/sein/Desktop/project`).

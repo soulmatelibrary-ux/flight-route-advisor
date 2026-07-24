@@ -101,6 +101,21 @@ html, body {
 .route-options li .tag-good { color: var(--green); font-weight: 600; }
 .route-options li .tag-warn { color: #c0392b; font-weight: 600; }
 
+/* 경로 상층풍·연직시어·추천고도(A3, docs/13-ai-reasoning-dev-plan.md) */
+.route-wind { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 4px; }
+/* 완성본 #rp-wind.hw 이식 — 현재 표시 중인 고도가 정풍이거나 시어가 강함 임계 초과일 때 경고 배경 */
+.route-wind.route-wind-warn { background: rgba(201,57,43,0.08); }
+.route-wind .wind-good { color: var(--green); font-weight: 600; }
+.route-wind .wind-bad { color: #c0392b; font-weight: 600; }
+.wind-fl-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+.wlvl-btn {
+  border: 1px solid rgba(34,48,60,0.2); border-radius: 4px; padding: 2px 6px; font-size: 10.5px;
+  background: #fff; cursor: pointer;
+}
+.wlvl-btn.on { border-color: var(--orange); font-weight: 700; }
+.wlvl-btn.rec::after { content: " ★"; }
+.wind-grade { display: inline-block; padding: 1px 6px; border-radius: 4px; color: #fff; font-weight: 600; }
+
 .error { color: #c0392b; font-size: 12px; }
 
 #map-wrap { position: relative; }
@@ -125,6 +140,7 @@ html, body {
 
 .route-ops-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
 .route-fois-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+.route-flow-summary { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
 
 .weather-popup { font-size: 12px; max-width: 260px; }
 .weather-popup .headline { font-weight: 700; }
@@ -171,3 +187,56 @@ html, body {
   border-right: 2.5px solid transparent;
   border-bottom: 4.5px solid var(--ink-soft);
 }
+
+.layer-control {
+  background: var(--paper);
+  padding: 8px 10px;
+  font-size: 12px;
+  max-height: 80vh;
+  overflow-y: auto;
+  min-width: 190px;
+}
+.layer-control-title { font-weight: 700; margin-bottom: 4px; }
+.layer-control-section { border-top: 1px solid rgba(34, 48, 60, 0.12); margin-top: 4px; padding-top: 4px; }
+.layer-control-section:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
+.layer-control-header {
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+}
+.layer-control-arrow { display: inline-block; margin-right: 4px; transition: transform 0.15s; }
+.layer-control-section.collapsed .layer-control-arrow { transform: rotate(-90deg); }
+.layer-control-section.collapsed .layer-control-body { display: none; }
+.layer-control-body { display: flex; flex-direction: column; }
+.layer-control-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 2px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stca-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 800;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  max-width: 320px;
+  font-family: "IBM Plex Mono", monospace;
+}
+.stca-panel-header { font-weight: 700; margin-bottom: 2px; }
+.stca-panel-header.cpa { color: var(--cpa-purple); margin-top: 6px; }
+.stca-row { padding: 2px 0; border-bottom: 1px dotted rgba(34, 48, 60, 0.15); }
+.stca-row:last-child { border-bottom: none; }
+.stca-row.warn { color: var(--hazard-red); }
+.stca-row.caution { color: var(--stca-caution); }
+.stca-row.cpa { color: var(--cpa-purple); cursor: pointer; }
+.stca-row .stca-meta { color: var(--ink-soft); margin-left: 6px; }

@@ -106,6 +106,7 @@ def _mask_database_url(url: str) -> str:
 class Settings:
     database_url: str
     source_project_root: Path
+    porting_package_root: Path
     upload_dir: Path
     workspace_root: Path
     max_upload_mb: int
@@ -118,6 +119,7 @@ class Settings:
         return (
             f"Settings(database_url={masked!r}, "
             f"source_project_root={self.source_project_root}, "
+            f"porting_package_root={self.porting_package_root}, "
             f"upload_dir={self.upload_dir}, workspace_root={self.workspace_root}, "
             f"max_upload_mb={self.max_upload_mb}, "
             f"allowed_extensions={self.allowed_extensions}, "
@@ -139,6 +141,9 @@ def load_settings() -> Settings:
         database_url=database_url,
         source_project_root=_existing_dir(
             "SOURCE_PROJECT_ROOT", _require_env("SOURCE_PROJECT_ROOT")
+        ),
+        porting_package_root=_existing_dir(
+            "PORTING_PACKAGE_ROOT", _require_env("PORTING_PACKAGE_ROOT")
         ),
         upload_dir=_ensured_dir(
             _optional_env("INGESTION_UPLOAD_DIR", str(_DEFAULT_DATA_ROOT / "uploads"))

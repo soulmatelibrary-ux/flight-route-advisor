@@ -53,10 +53,10 @@ export function createHazardLayers(CONFIG) {
       const rings = ringOf(s.coords);
       if (rings.length === 0) continue;
       L.polygon(rings, {
-        color: CONFIG.tokens.orange,
+        color: CONFIG.tokens.hazardRed,
         weight: 1.5,
         fillOpacity: 0.15,
-        fillColor: CONFIG.tokens.orange,
+        fillColor: CONFIG.tokens.hazardRed,
       })
         .bindPopup(sigmetPopupHtml(s))
         .addTo(sigmetGroup);

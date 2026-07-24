@@ -34,11 +34,13 @@
       <div id="route-briefing" class="briefing"></div>
       <ol id="route-options" class="route-options"></ol>
       <p id="route-error" class="error" hidden></p>
+      <div id="route-wind" class="route-wind" hidden></div>
     </section>
 
     <section id="map-wrap">
       <div id="map"></div>
       <div id="minimap"></div>
+      <div id="stca-panel" class="stca-panel" hidden></div>
       <div id="radar-bar" hidden>
         <button id="radar-play-btn" type="button" aria-label="재생/일시정지">▶</button>
         <input id="radar-slider" type="range" min="0" max="0" value="0" step="1" aria-label="레이더 프레임" />
@@ -51,6 +53,7 @@
       <div id="fir-chain" class="fir-chain muted">경로를 선택하면 경유 FIR 체인이 표시됩니다.</div>
       <div id="route-ops-summary" class="route-ops-summary muted"></div>
       <div id="route-fois-summary" class="route-fois-summary muted"></div>
+      <div id="route-flow-summary" class="route-flow-summary muted"></div>
 
       <h2>FOIS 지연원인</h2>
       <form id="fois-form">

@@ -14,8 +14,12 @@
 (참고: `사전빌드_JSON/odr2.json`에는 상층풍/ACDM 유래로 보이는 추가 필드가 더 있으나,
 그건 04-E(상층풍) 등 2단계 기능 소관이라 이 배치의 범위가 아니다 — docs/05 §3.)
 
-읽기 전용 원칙(docs/02 §4.3): 이 배치의 산출물은 전처리 DB에 쓰지 않고 이 서비스
-소유의 파일 아티팩트(`app/reference/artifacts/odr2.json`)로 둔다.
+읽기 전용 원칙(docs/02 §4.3): 이 배치의 산출물은 전처리 DB(`processed_*`)에 쓰지 않는다.
+대신 이 서비스 전용 신규 role `advisor_artifact_writer`(processed_*/raw_*/reference_*
+접근 권한 없음, data-ingestion-backend alembic `d4f7a91c3e26_*`)로만 `advisor_odr2_*`
+6개 테이블에 truncate-and-reload 한다(파일 아티팩트 `odr2.json`은 폐지, 2026-07-23
+사용자 요청으로 DB 통합). 조회 측(`app/queries/routes.py`)은 기존 읽기전용 role
+(`advisor_readonly`)로 이 테이블을 SELECT한다.
 """
 
 from __future__ import annotations
@@ -26,15 +30,57 @@ import math
 import re
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import select
 
 from app.config import settings
+from app.db import artifact_session
 from app.db.session import get_engine
 from app.queries.latest_run import latest_view
+
+# --- advisor_odr2_* 6종 (경량 Core 프록시, 스키마 단일 출처는 data-ingestion-backend
+# alembic d4f7a91c3e26_*·column_map.ADVISOR_ODR2_COLUMNS) ---
+_ODR2_OD = sa.table(
+    "advisor_odr2_od",
+    sa.column("dep"), sa.column("arr"), sa.column("total_flights"),
+    sa.column("data_period"), sa.column("generated_at"),
+)
+_ODR2_ROUTE = sa.table(
+    "advisor_odr2_route",
+    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("flights"),
+    sa.column("avg_min"), sa.column("delay_count"), sa.column("heavy_count"),
+    sa.column("cruise_parity"),
+)
+_ODR2_ROUTE_FIR = sa.table(
+    "advisor_odr2_route_fir",
+    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"), sa.column("fir_icao"),
+)
+_ODR2_ROUTE_FIX = sa.table(
+    "advisor_odr2_route_fix",
+    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"), sa.column("fix_name"),
+)
+_ODR2_TRACK_POINT = sa.table(
+    "advisor_odr2_track_point",
+    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"),
+    sa.column("lat"), sa.column("lon"),
+)
+_ODR2_FULL_ROUTE_POINT = sa.table(
+    "advisor_odr2_full_route_point",
+    sa.column("dep"), sa.column("arr"), sa.column("rank"), sa.column("seq"),
+    sa.column("lat"), sa.column("lon"),
+)
+_ODR2_TABLE_NAMES = (
+    "advisor_odr2_full_route_point",
+    "advisor_odr2_track_point",
+    "advisor_odr2_route_fix",
+    "advisor_odr2_route_fir",
+    "advisor_odr2_route",
+    "advisor_odr2_od",
+)
 
 # --- 외부 자산 경로 상수 (env 기반, docs/CLAUDE.md §0.1) ---
 _REFERENCE_DIR = "사전빌드_JSON"
@@ -368,7 +414,68 @@ def _data_period(rows: list[dict[str, Any]]) -> str | None:
     return f"{min(days).replace('-', '')}-{max(days).replace('-', '')}"
 
 
-def run(output_path: Path | None = None) -> dict:
+def _persist(odr2: dict[str, list], data_period: str | None) -> None:
+    """odr2 dict(§4.2 스키마 그대로)를 `advisor_odr2_*` 6종에 truncate-and-reload 한다.
+
+    이 배치는 매번 `processed_flight_data` 전체를 다시 집계하는 전체 재계산이지
+    증분(append)이 아니므로, 예전 파일 아티팩트를 통째로 덮어쓰던 것과 동일하게
+    테이블도 통째로 비우고 다시 채운다(`reference_*` 정적 테이블과 동일한
+    truncate-and-reload 패턴, docs/02-db-integration.md §2 각주). 하나의 트랜잭션으로
+    묶어 조회 측(advisor_readonly)이 교체 중간의 반쪽 상태를 보는 일이 없게 한다.
+    """
+    generated_at = datetime.now(timezone.utc)
+    od_rows: list[dict[str, Any]] = []
+    route_rows: list[dict[str, Any]] = []
+    fir_rows: list[dict[str, Any]] = []
+    fix_rows: list[dict[str, Any]] = []
+    track_rows: list[dict[str, Any]] = []
+    frc_rows: list[dict[str, Any]] = []
+
+    for od, (total, routes) in odr2.items():
+        dep, arr = od.split("|")
+        od_rows.append({
+            "dep": dep, "arr": arr, "total_flights": total,
+            "data_period": data_period, "generated_at": generated_at,
+        })
+        for rank, route in enumerate(routes):
+            n, avg_min, delay_count, heavy_count, firs, pixes, track, frc, parity = route
+            route_rows.append({
+                "dep": dep, "arr": arr, "rank": rank, "flights": n, "avg_min": avg_min,
+                "delay_count": delay_count, "heavy_count": heavy_count, "cruise_parity": parity,
+            })
+            for seq, fir_icao in enumerate(firs):
+                fir_rows.append({"dep": dep, "arr": arr, "rank": rank, "seq": seq, "fir_icao": fir_icao})
+            for seq, fix_name in enumerate(pixes):
+                fix_rows.append({"dep": dep, "arr": arr, "rank": rank, "seq": seq, "fix_name": fix_name})
+            for i in range(0, len(track), 2):
+                track_rows.append({
+                    "dep": dep, "arr": arr, "rank": rank, "seq": i // 2,
+                    "lat": track[i], "lon": track[i + 1],
+                })
+            for i in range(0, len(frc), 2):
+                frc_rows.append({
+                    "dep": dep, "arr": arr, "rank": rank, "seq": i // 2,
+                    "lat": frc[i], "lon": frc[i + 1],
+                })
+
+    engine = artifact_session.get_engine()
+    with engine.begin() as conn:
+        conn.execute(sa.text(f"TRUNCATE {', '.join(_ODR2_TABLE_NAMES)};"))
+        if od_rows:
+            conn.execute(sa.insert(_ODR2_OD), od_rows)
+        if route_rows:
+            conn.execute(sa.insert(_ODR2_ROUTE), route_rows)
+        if fir_rows:
+            conn.execute(sa.insert(_ODR2_ROUTE_FIR), fir_rows)
+        if fix_rows:
+            conn.execute(sa.insert(_ODR2_ROUTE_FIX), fix_rows)
+        if track_rows:
+            conn.execute(sa.insert(_ODR2_TRACK_POINT), track_rows)
+        if frc_rows:
+            conn.execute(sa.insert(_ODR2_FULL_ROUTE_POINT), frc_rows)
+
+
+def run() -> dict:
     rows = _fetch_flight_data_rows()
     data_period = _data_period(rows)
     agg, votes = aggregate(rows)
@@ -389,21 +496,11 @@ def run(output_path: Path | None = None) -> dict:
     lookup, apc = _load_dafif_lookups(settings.porting_package_root)
     odr2 = build_odr2(agg, votes, fir_set, lookup, apc)
 
-    output_path = output_path or (Path(__file__).resolve().parent.parent / "app" / "reference" / "artifacts" / "odr2.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as f:
-        json.dump(odr2, f, separators=(",", ":"), ensure_ascii=False)
+    _persist(odr2, data_period)
 
-    # odr2.json 자체는 원본 파이프라인과 필드 단위로 정확히 일치해야 하는 산출물이라
-    # ({"DEP|ARR": [total, routes]} 그대로, phase8/ODR2 기준선 대조 대상) 메타데이터를
-    # 그 안에 섞지 않고 별도 사이드카 파일로 둔다(docs/03 §2 run_id/data_period 계약).
-    meta_path = output_path.with_name(output_path.stem + "_meta.json")
-    with meta_path.open("w", encoding="utf-8") as f:
-        json.dump({"data_period": data_period}, f, ensure_ascii=False)
-
+    n_routes = sum(len(routes) for _total, routes in odr2.values())
     print(
-        f"odr2 저장: {output_path} ({output_path.stat().st_size / 1e6:.2f} MB), "
-        f"data_period={data_period}",
+        f"odr2 DB 적재: OD {len(odr2)}개 · 경로그룹 {n_routes}개, data_period={data_period}",
         file=sys.stderr,
     )
     return odr2

@@ -109,6 +109,7 @@ def _mask_database_url(url: str) -> str:
 @dataclass(frozen=True, repr=False)
 class Settings:
     database_url: str
+    advisor_artifact_database_url: str | None
     db_ssl_mode: str
     db_pool_size: int
     weather_proxy_url: str
@@ -121,8 +122,14 @@ class Settings:
 
     def __repr__(self) -> str:  # 자격증명 노출 방지(docs/06 §8)
         masked = _mask_database_url(self.database_url)
+        masked_artifact = (
+            _mask_database_url(self.advisor_artifact_database_url)
+            if self.advisor_artifact_database_url
+            else None
+        )
         return (
-            f"Settings(database_url={masked!r}, db_ssl_mode={self.db_ssl_mode!r}, "
+            f"Settings(database_url={masked!r}, advisor_artifact_database_url={masked_artifact!r}, "
+            f"db_ssl_mode={self.db_ssl_mode!r}, "
             f"db_pool_size={self.db_pool_size}, weather_proxy_url={self.weather_proxy_url!r}, "
             f"source_project_root={self.source_project_root}, "
             f"porting_package_root={self.porting_package_root}, "
@@ -145,8 +152,19 @@ def load_settings() -> Settings:
     if not database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
         raise ConfigError("ADVISOR_DATABASE_URL은 postgresql:// (또는 +psycopg2) 스킴이어야 함")
 
+    # ADVISOR_ARTIFACT_DATABASE_URL(쓰기 role advisor_artifact_writer)은 배치
+    # (backend/batch/{build_odr2,build_flow}.py)만 쓴다. API 프로세스(main.py 이하)는
+    # 이 값을 참조하지 않으므로 필수로 두지 않는다 — 읽기전용 API 서버를 쓰기 자격증명 없이
+    # 그대로 기동할 수 있어야 최소권한 원칙이 실질적으로 지켜진다.
+    artifact_database_url = os.environ.get("ADVISOR_ARTIFACT_DATABASE_URL") or None
+    if artifact_database_url and not artifact_database_url.startswith(
+        ("postgresql://", "postgresql+psycopg2://")
+    ):
+        raise ConfigError("ADVISOR_ARTIFACT_DATABASE_URL은 postgresql:// (또는 +psycopg2) 스킴이어야 함")
+
     return Settings(
         database_url=database_url,
+        advisor_artifact_database_url=artifact_database_url,
         db_ssl_mode=_validate_db_ssl_mode(_optional_env("DB_SSL_MODE", "")),
         db_pool_size=_parse_positive_int("DB_POOL_SIZE", _optional_env("DB_POOL_SIZE", "5")),
         weather_proxy_url=_optional_env("WEATHER_PROXY_URL", "http://localhost:3000/proxy"),

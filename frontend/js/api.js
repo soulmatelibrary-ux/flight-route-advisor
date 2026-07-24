@@ -78,6 +78,8 @@ export const api = {
     getJson("/fois/delays", { direction, airport, date_from: dateFrom, date_to: dateTo }),
   flowManagement: ({ dateFrom, dateTo, fir, airway, limit, offset } = {}) =>
     getJson("/flow-management", { date_from: dateFrom, date_to: dateTo, fir, airway, limit, offset }),
+  routeFlow: (dep, arr) => getJson("/routes/flow", { dep, arr }),
+  delayHistory: (dep, arr, hour) => getJson("/routes/delay-history", { dep, arr, hour }),
   airportOps: ({ icao, dateFrom, dateTo } = {}) =>
     // icao는 경로 세그먼트라 buildQuery()의 URLSearchParams 인코딩을 안 타므로 직접
     // encodeURIComponent — 서버가 형식(4자리 영문)을 검증하지만 클라이언트에서도

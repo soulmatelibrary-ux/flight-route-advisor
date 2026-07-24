@@ -1,7 +1,7 @@
 # 13. AI 경로추천 근거화 — 추가개발 구현 스펙 (단계별)
 
-- 문서 버전: 1.0
-- 작성일: 2026-07-23
+- 문서 버전: 1.1
+- 작성일: 2026-07-23 / v1.1: 2026-07-23(STEP A7 SUAS/MOA 발효시간 판정 추가, D23)
 - 상태: ⚠ **이것은 "확정 방향(A)"에 따른 구현 스펙이다.** 결정 게이트(§0 G0-2·G0-3·G0-4)는
   [14 개선요구서](./14-improvement-request.md) v1.0으로 **충족됨(2026-07-23)**, [07-checklist](./07-checklist.md)
   항목화 완료. **남은 착수 조건은 G0-1(현재 빌드 완료)뿐** — 그 전에는 이 문서를 "읽기만" 한다.
@@ -97,6 +97,8 @@
 | **상층풍·시어·추천고도** | `routeWind`/`calcFL` | ❌ 없음 | **A3** |
 | **실시간 섹터 교통·수요예측** | `analyzeFIR`(ACCS+ADS-B) | ⚠ `adsb.js`는 있으나 섹터배정·외삽 없음 | **A4** |
 | ACC 섹터 지오메트리 | `ACCS`(acc_sectors.json) | ⚠ 참조로더에 미포함 확인 필요 | A4 선행 |
+| **SUAS/MOA 참조 레이어** | `SU`/`SUW`(suas.json) | ❌ 미구현 — [03](./03-backend-api.md) `/api/reference/suas`는 "(2단계)"로만 명세, 실코드 없음 | A7 선행 |
+| **SUAS/MOA 발효시간(EFF_TIMES)** | DAFIF `SUAS_PAR.TXT` 컬럼 | ❌ **완성본도 미보유**(빌드 단계 누락, 신규 발견 2026-07-23) | **A7** |
 
 > 착수 첫 작업으로 위 "advisor 현황"을 **실제 코드로 재확인**한다(문서와 코드가 어긋나면
 > [CLAUDE.md](../CLAUDE.md) §8·§10대로 사용자에게 차이 보고 후 진행).
@@ -109,9 +111,13 @@
 **시큐어코딩**(입력검증·파라미터라이즈드 쿼리, §3) · **읽기전용 소비**(DB에 쓰지 않음, §5) ·
 **좌표 `[lat,lon]`·시각 KST**(§7) · STEP 종료 시 **리뷰에이전트 게이트**(§4) 통과 후에만 체크.
 
-### STEP A1 — OD·경로별 흐름관리 영향률 서빙 + 노선 위젯
+### STEP A1 — OD·경로별 흐름관리 영향률 서빙 + 노선 위젯 (완료, 2026-07-23)
 - **목표**: `FLOW.od[dep|arr]`(영향률 pct·정시율 ponA/ponN·평균지연 dlyA/dlyN·주사유 rs·주제한 lim·
   시간대 hrP)과 `FLOW.g[dep|arr|route]`(경로별 영향률)을 advisor가 제공.
+- ⚠ **저장소 갱신(2026-07-23)**: 처음엔 아래처럼 파일 아티팩트(`reference/artifacts/flow.json`)로
+  구현했으나, 로컬 Docker DB 통합 요청으로 `advisor_flow_*` 6개 테이블(완전 정규화, 신규 role
+  `advisor_artifact_writer`)로 옮겼다 — 배치·쿼리 로직·API 응답 계약은 무변경, 저장 위치만 교체.
+  상세는 [02 §4.3·§6](./02-db-integration.md).
 - **대상**:
   - 배치: `backend/batch/build_flow.py`(신규) — 전처리 DB `processed_flow_management`/`processed_flight_data`를
     읽어 `reference/artifacts/flow.json` 생성(ODR2 배치와 동일 패턴, 읽기전용). ⚠ 산출 스키마는
@@ -124,20 +130,27 @@
 - **수용기준**: 알려진 OD(예: VHHH|RKSI)에서 완성본과 동일한 영향률/정시율 수치가 나온다. 미기록 OD는
   404 아님 "기록 부족" 빈응답 처리(완성본 `routeFlowBrief` 동작과 일치).
 
-### STEP A2 — OD 지연원인 분해 서빙
-- **목표**: `ODHR`(OD별 시간대 정시율 `od[..].hr`, 공항별 시간대 출발량 `ap[..]`, 지연원인 `CAUSES`) 제공.
+### STEP A2 — OD 시간대별 교통량/소요시간 서빙 (완료, 2026-07-23 — 정시율 범위 축소)
+- **목표(원안)**: `ODHR`(OD별 시간대 정시율 `od[..].hr`, 공항별 시간대 출발량 `ap[..]`, 지연원인 `CAUSES`) 제공.
 - **대상**: `build_odhr.py`(배치) → `odhr.json` → `queries/odhr.py` → `GET /api/routes/delay-history?dep=&arr=&hour=`
   → `api.js` → 필요 시 위젯(팝업에서 소비하므로 별도 패널 불필요, B1에서 context로 흡수 가능).
-- **주의(D7)**: FOIS `reason` 원문에 민감정보가 있을 수 있음 → **분류 코드/비율만** 노출, 원문 제외.
-- **수용기준**: hour 지정 시 완성본 `castScript`의 "이 시간대 정시율 X%" 계산과 일치.
+- **주의(D7)**: FOIS `reason` 원문에 민감정보가 있을 수 있음 → **분류 코드/비율만** 노출, 원문 제외(`build_odhr.py`는 `reason` 컬럼 자체를 읽지 않음).
+- ⚠ **범위 축소(A1과 동일한 사유, 2026-07-23 사용자 확인)**: 완성본 `odhr.json`의 `od[..].hr[hour]` 6원소 중 `n`(편수)·`teS`/`teN`(TEET 합/유효건수)만 실측 검증됨(golden VHHH|RKSI 24시간대 전부 정확 일치). `dly`(지연편수, "시간대 정시율"의 근거)는 A1의 `ponA`/`ponN`과 같은 갭이지만 이번엔 **대체 계산 스크립트도 찾지 못함**(`SOURCE_PROJECT_ROOT` 전처리 스킬 4종 전체를 "정시율"/"on_time"/"ODHR"로 검색해도 결과 없음) — ACDM 임계값·FOIS 등재 여부로 여러 시도했으나 전부 golden과 불일치해 보류. **실제 응답 계약**: `on_time_pct`는 항상 `null`, 대신 `window:{hour, flights, avg_teet_min, delta_vs_baseline_min}`(검증된 소요시간 델타)를 제공. `CAUSES`는 고정 사전이 아니라 `processed_fois_{departure,arrival}.cause_major` 실측 distinct 집계(골든 13종과 정확히 일치 확인).
+- **수용기준(수정)**: hour 지정 시 완성본과 동일한 편수(`n`)·평균 TEET(`teS/teN`)가 나온다(실측 일치 확인). "시간대 정시율 X%"는 이번 범위에서 제외 — `on_time_pct`는 항상 null이며 이를 소비하는 B1 이후 단계는 null을 전제로 설계해야 한다.
 
-### STEP A3 — 상층풍·시어·추천고도 (client-side)
+### STEP A3 — 상층풍·시어·추천고도 (client-side, 완료 2026-07-23)
 - **목표**: 선택 경로에 대해 완성본 `routeWind`/`calcFL`/`drawShear`와 동등한 상층풍·연직시어·
   ★추천고도(시어≤7 중 소요단축 최대, 동률 시 시어 낮은 쪽 — [04 §E](./04-frontend-migration.md))를 산출.
-- **대상**: `frontend/js/layers/wind.js`(신규) 또는 기존 route 레이어 확장. 상층풍 소스는 완성본과 동일
-  (Open-Meteo류)이며 **URL은 config.js `weather`/`externalApis`에 둔다**(하드코딩 금지). 실시간·클라이언트
-  이므로 백엔드 불필요.
+- **대상**: `frontend/js/layers/wind.js`(신규). 상층풍 소스는 완성본과 동일(Open-Meteo GFS)이며
+  **URL·기압면 매핑·순항고도 후보·TAS·시어 임계값은 `config.js`/`config.example.json`의 `CONFIG.wind`**
+  (하드코딩 금지). 실시간·클라이언트이므로 백엔드 불필요.
 - **수용기준**: 경로 카드에 추천 FL·배풍/정풍·시어 등급이 표시되고, 완성본과 동일 입력에서 동일 FL 추천.
+- ⚠ **A1/A2와 성격이 다름**: 완성본 HTML에 `routeWind`/`segWindAt`/`calcFL`/`routeParity`/`catGrade`/
+  `drawShear`/`renderWind` 원본 함수가 그대로 있어(과거 배치처럼 역산이 필요 없음) 로직 변경 없이
+  줄 단위 포팅. 실시간 외부 API라 golden JSON 대조 검증은 불가 — 대신 순수함수 단위검증(합성 입력) +
+  실제 Open-Meteo 라이브 호출 종단확인으로 대체. `senior-code-reviewer` 통과(Critical/High 없음,
+  Low 3건 수정: drawShear 중복호출·불필요 escapeHtml·`.hw` 경고배경 누락). 상세는
+  [07-checklist](./07-checklist.md) A3 항목.
 
 ### STEP A4 — 실시간 섹터 교통·수요예측 (client-side, 병목 소스)
 - **목표**: 완성본 `analyzeFIR`의 핵심 이식 — 현재 ADS-B 항공기를 ACC 섹터에 배정, **속도·방향으로
@@ -174,14 +187,38 @@
 - **수용기준**: 선택 경로에 진출입 게이트·출발 활주로 분포가 표시되고, reasoningContext(`selected_route.gate_*`)에
   담긴다. 완성본 `castScript`의 "진입 X, 진출 Y를 사용하는 경로" 서술과 동일 입력.
 
----
-
-## 5. Phase B — 통합기 (reasoning context 조립)
+### STEP A7 — SUAS/MOA 통과시각 발효 판정 (신규, [11 §18](./11-ai-route-reasoning-proposal.md)·D23)
+- **배경**: 사용자 발견(2026-07-23) — DAFIF `SUAS_PAR.TXT`(`PORTING_PACKAGE_ROOT/원본데이터/DAFIFT/SUAS/`,
+  §0.1 읽기전용 외부자산)에 MOA 등 특수공역의 **요일·시간별 발효시간(`EFF_TIMES`)** 이 있으나(전체
+  18,426건 중 16,327건 실값, 일본도 264건·MOA 66건 확인), 완성본조차 이 필드를 `suas.json` 빌드 단계에서
+  누락시켰다 — **완성본에도 없는 신규 신호**이며, 이 STEP만은 "이식"이 아니라 "신규 파생"이다.
+- **목표**: 선택 경로가 통과 예정 시각에 **구조화 패턴상 발효 중**인 SUAS/MOA가 있으면 병목/우회 근거로
+  제시한다(예: "경로 X는 화~금 09시 MOA 활성 시간대 통과 — 우회 가능성 확인").
+- **선행(2단)**:
+  1. **SUAS 참조 레이어 자체 포팅**([03](./03-backend-api.md) `/api/reference/suas`, 현재 미구현) —
+     이 STEP의 전제조건. 별도 2단계 항목으로 이미 문서화돼 있으나 실코드 없음, 이 STEP 착수 전 완료 확인.
+  2. `EFF_TIMES` 보존 — `사전빌드_JSON/suas.json`류 빌드가 이 컬럼을 버리므로, advisor 자체 배치가
+     원본 `SUAS_PAR.TXT`에서 **직접** 읽어 보존해야 한다(백데이터 사전빌드본에 의존 불가).
+- **파싱 규약(안전 우선 — 창작·억측 금지)**:
+  - **구조화 가능(1단계 반영)**: 요일 키워드(`MON`~`SUN`, `MON-FRI`, `MON-SAT`, `DLY` 등) + UTC 시간범위
+    (`HHMM-HHMMZ`) 조합 → `{days:[...], utc_start, utc_end}` 구조로 정규식 파싱.
+  - **비정형(1단계 미반영)**: `SR-SS`(일출-일몰, 위치·계절 종속) · `BY NOTAM`/`OT BY NOTAM` · 그 외 자유
+    서술 각주 — **발효 여부를 단정하지 않고** `status: "확인 필요(NOTAM)"` 로만 노출. 파싱 실패를 임의
+    기본값(예: "비활성으로 간주")으로 채우지 않는다(안전 사고 방지).
+- **대상**:
+  - 배치: `backend/batch/build_suas.py`(신규) — DAFIF `SUAS_PAR.TXT`를 읽어 `reference/artifacts/suas.json`
+    생성(위치·고도 + `eff_times_raw` + 파싱된 `structured_schedule`\|`null`). 읽기전용 외부자산 소비([CLAUDE.md](../CLAUDE.md) §0.1).
+  - 쿼리/라우터: 기존 §03 `suas` 참조 엔드포인트(포팅 완료 후) 확장 — 스케줄 필드 노출.
+  - 프론트: `frontend/js/route-bottlenecks.js`(A5) 확장 — 경로 통과 좌표·FIR와 SUAS 폴리곤 교차 +
+    통과 예상시각(§17.3과 동일 근사, doc 11)으로 발효 여부 판정해 병목 후보(`type: "airspace"`)에 추가.
+- **수용기준**: (1) 알려진 예시(한국 ASAN `MON-FRI 2300-1300Z, SAT 2300-0400Z`)에서 지정 요일·UTC 시각
+  입력 시 발효/비발효가 올바르게 판정된다(단위 테스트). (2) `SR-SS`/`BY NOTAM` 케이스는 발효를 단정하지
+  않고 "확인 필요"로만 표시된다. (3) SUAS 참조 레이어 미포팅 시 이 STEP은 조용히 스킵(에러 아님).
 
 ### STEP B1 — reasoningContext 스키마 확정
 - **목표**: LLM 프롬프트 입력이 될 **정규화 JSON 1개**를 정의. **완성본 `castScript`의 12스텝을 그대로
   입력 항목 스펙으로 삼는다**(각 스텝이 참조하는 값 = context 필드).
-- **산출**: 이 문서 §7에 스키마 초안(아래). 계산은 하지 않고 A1~A6 결과를 담기만 한다.
+- **산출**: 이 문서 §7에 스키마 초안(아래). 계산은 하지 않고 A1~A7 결과를 담기만 한다.
 - **수용기준**: castScript가 문장으로 만들던 모든 값이 context에 필드로 존재(누락 없음).
 
 ### STEP B2 — context 어셈블러 (순수 함수)
@@ -195,7 +232,7 @@
 > Phase C를 시작한다.
 
 1. **스키마 v1.0 태그**: §7 스키마가 `schema_version: "1.0"`으로 확정되고, 이후 변경은 버전업으로만.
-2. **필드 충족**: A1~A6의 실제 데이터로 context 필드가 채워진다 — 알려진 OD 3건 이상에서 `flow`·`wind`·
+2. **필드 충족**: A1~A7의 실제 데이터로 context 필드가 채워진다 — 알려진 OD 3건 이상에서 `flow`·`wind`·
    `selected_route`·`sectors`(ADS-B on 시)·`bottlenecks`가 `null`이 아닌 실값으로 나오는 것을 확인.
 3. **결측 규약**: 신호 미가용 필드는 예외 없이 `null`(임의 기본값·추정 금지) — C 층이 "데이터 없음"을 알 수 있어야 함.
 4. **민감도 태그 완비**(§7.1): 모든 필드에 민감도 등급이 부여되고, `restricted` 필드가 context에 실리지 않음이 검증됨.
@@ -252,13 +289,14 @@
     "delay_affected_min": 21, "main_causes": ["기술·항공기장비 31","반응성·연쇄지연 22"],
     "main_limits": ["OODAK NOT AVBL"], "hour_impact_pct": 30, "best_hours": ["03","04","05"]
   },
-  "delay_history": { "hour": 9, "hour_on_time_pct": 71, "dep_hourly_vs_avg": 1.4 }, // A2, 없으면 null
+  "delay_history": { "hour": 9, "on_time_pct": null, "avg_teet_min": 181.7, "delta_vs_baseline_min": -1.9 }, // A2(2026-07-23 구현) — on_time_pct는 계산식 미검증으로 항상 null, 소요시간 델타만 실측 검증됨. 없으면 전체 null
   "wind": { "rec_fl": "FL360", "tail_head_kt": 18, "shear": 4, "shear_grade": "약함" }, // A3
   "sectors": [                                                // A4 (실시간, ADS-B off면 [])
     { "id":"JN","ko":"제주북","now":9,"fut10":11,"trend":"▲","grade":"혼잡","wx_grade":"주의" }
   ],
-  "bottlenecks": [                                            // A5
-    { "seg":"ZSHA 09~10시", "reason":"역사 상위 혼잡 + 강수셀 교차", "severity":"경고" }
+  "bottlenecks": [                                            // A5, A7(type:"airspace")
+    { "seg":"ZSHA 09~10시", "reason":"역사 상위 혼잡 + 강수셀 교차", "severity":"경고", "type":"traffic_wx" },
+    { "seg":"KADIZ 인근 MOA", "reason":"화~금 09시 MOA 활성 시간대 통과", "severity":"확인", "type":"airspace" }
   ],
   "airport_wx": { "dep": { "cat":"VFR","wind":"...","warn":[] }, "arr": {...} }, // 기존 weather.js
   "generated_at_kst": "2026-07-23T09:00:00+09:00"
@@ -335,8 +373,8 @@
 
 ## 11. 착수 순서 요약 (한 줄)
 
-`A1→A2→A3→A4→A5→A6`(신호 이식) → `B1→B2`(통합기) → `C1→C2→C3`(LLM 층, 수동복붙) → `C4`(프록시 스켈레톤)
-→ 통합검증. 각 화살표마다 리뷰게이트 + 문서 동기화.
+`A1→A2→A3→A4→A5→A6→A7`(신호 이식, A7은 SUAS 참조레이어 포팅 선행) → `B1→B2`(통합기) →
+`C1→C2→C3`(LLM 층, 수동복붙) → `C4`(프록시 스켈레톤) → 통합검증. 각 화살표마다 리뷰게이트 + 문서 동기화.
 
 ## 12. 열린 질문 (착수 중 사용자 확인)
 

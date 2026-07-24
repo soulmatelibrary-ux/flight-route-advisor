@@ -38,6 +38,34 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
     groups[name].clearLayers();
   }
 
+  // 그룹형 레이어 컨트롤 체크박스로 firs/tca/airways/waypoints/navaids를 껐다 켤 수 있게
+  // 됐는데(사용자 요청 2026-07-23), showFocus()/showBulk()가 경로 선택·뷰모드 전환마다
+  // 이 그룹들을 무조건 다시 addLayer해 체크박스로 꺼둔 상태가 도로 켜지는 회귀가 있었다
+  // (리뷰 지적 — 처음엔 TCA만 개별 방어했으나 나머지도 동일 문제라 일반화). 이 맵을 그룹
+  // on/off의 단일 출처로 두고, showFocus/showBulk/부팅 시 초기화 모두 이걸 참조한다.
+  // 기본값(true 3개+false tca)은 기존 부팅 동작과 동일 — main.js가 하던 개별 addTo 루프를
+  // 여기로 옮겼다.
+  const enabledByName = { firs: true, tca: false, airways: true, waypoints: true, navaids: true };
+
+  function setGroupEnabled(name, enabled) {
+    enabledByName[name] = enabled;
+    if (enabled) map.addLayer(groups[name]);
+    else map.removeLayer(groups[name]);
+  }
+
+  function isGroupEnabled(name) {
+    return enabledByName[name];
+  }
+
+  function applyEnabledGroups(names) {
+    for (const name of names) {
+      if (enabledByName[name]) map.addLayer(groups[name]);
+      else map.removeLayer(groups[name]);
+    }
+  }
+
+  applyEnabledGroups(Object.keys(enabledByName));
+
   function renderFirs(firs) {
     clear("firs");
     for (const fir of firs) {
@@ -109,8 +137,8 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
 
   // 픽스/항행시설/공항 마커 크기·색상: 전세계/지역 컨텍스트에서 개수가 많아(픽스 800·
   // 항행시설 수천·공항 10,030) 진한 ink 톤 + 원래 크기가 너무 눈에 띈다는 피드백(2026-07-23)
-  // 으로 크기 절반 + inkSoft(옅은 톤)로 낮춤. 결정 포커스는 이 레이어들을 거의 안 쓰므로
-  // (waypoints/tca/navaids는 focus에서 항상 빈 배열, 공항은 출발·도착 2개뿐) 영향 적음.
+  // 으로 크기 절반 + inkSoft(옅은 톤)로 낮춤. 결정 포커스는 tca/navaids가 항상 빈 배열이라
+  // 영향 없지만, waypoints는 경로 스코프 픽스가 실제로 표시된다(showFocus() 참고).
   function renderWaypoints(rows) {
     clear("waypoints");
     for (const wp of rows) {
@@ -125,7 +153,13 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
         fillColor: CONFIG.tokens.paper,
         fillOpacity: 1,
       })
-        .bindPopup(escapeHtml(wp.ident))
+        // 클릭 팝업 대신 호버 툴팁(사용자 요청, 2026-07-23) — permanent:true가 아니라
+        // 마우스가 올라간 마커 1개에서만 DOM이 생기므로, 이 파일 위 §180 주석의 permanent
+        // 툴팁 성능 문제(줌 3~5·다량 마커에서 상시 DOM)와는 다르다.
+        .bindTooltip(`<b>${escapeHtml(wp.ident)}</b><br>${wp.lat.toFixed(4)}, ${wp.lon.toFixed(4)}`, {
+          direction: "top",
+          offset: [0, -4],
+        })
         .addTo(groups.waypoints);
     }
     updateLabelVisibility();
@@ -165,7 +199,17 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
     updateLabelVisibility();
   }
 
+  // 공항 레이어는 줌에 따라 airportsLow/airportsAll을 자동으로 swap하는 자체 로직이라
+  // Leaflet의 단순 add/removeLayer 체크박스로는 표현이 안 된다 — 그룹형 레이어 컨트롤에
+  // "공항" 항목을 추가해달라는 요청(2026-07-23)으로 이 on/off 플래그를 신설, 꺼져 있으면
+  // 줌이 바뀌어도 두 그룹 다 지도에서 뺀다.
+  let airportsEnabled = true;
   function applyAirportZoomVisibility() {
+    if (!airportsEnabled) {
+      map.removeLayer(groups.airportsAll);
+      map.removeLayer(groups.airportsLow);
+      return;
+    }
     const showAll = map.getZoom() >= CONFIG.display.airportFullTypeZoom;
     if (showAll) {
       if (!map.hasLayer(groups.airportsAll)) map.addLayer(groups.airportsAll);
@@ -176,6 +220,11 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
     }
   }
   map.on("zoomend", applyAirportZoomVisibility);
+  applyAirportZoomVisibility(); // 초기 상태 반영(main.js가 하던 개별 addTo 루프 대체, 2026-07-23)
+  function setAirportsEnabled(enabled) {
+    airportsEnabled = enabled;
+    applyAirportZoomVisibility();
+  }
 
   // TCA/픽스/항행시설/공항의 permanent 툴팁은 성능 문제(줌 3~5, 항로 89,555·공항 10,030
   // 규모에서 페이지 응답 없음 발생, 2026-07-23)로 제거했다 — 툴팁은 항상 열려 있는 DOM
@@ -210,13 +259,28 @@ export function createReferenceLayers(map, CONFIG, hooks = {}) {
     applyAirportZoomVisibility,
     showFocus() {
       map.removeLayer(groups.airportsAll);
-      map.addLayer(groups.airportsLow);
-      for (const name of ["firs", "airways"]) map.addLayer(groups[name]);
-      for (const name of ["tca", "waypoints", "navaids"]) map.removeLayer(groups[name]);
+      // "공항" 레이어 컨트롤 체크박스가 꺼져 있으면(2026-07-23 추가) 뷰모드 전환으로
+      // 되살아나지 않게 한다 — airportsEnabled일 때만 low-detail 세트를 켠다.
+      if (airportsEnabled) map.addLayer(groups.airportsLow);
+      else map.removeLayer(groups.airportsLow);
+      // waypoints는 2026-07-23 focusWaypoints 추가 이후 실제 경로 스코프 픽스 데이터가
+      // 들어오는데도(main.js renderForCurrentState) 이 목록이 그대로 남아 있어 결정
+      // 포커스에서 항상 숨겨지던 버그(사용자 제보) — tca/navaids는 focus에서 여전히 빈
+      // 배열만 넘어오므로(renderTca([])·renderNavaids([])) 체크박스와 무관하게 계속 숨긴다.
+      // firs/airways/waypoints는 체크박스 상태(enabledByName)를 존중한다(리뷰 지적 — 예전엔
+      // 무조건 addLayer해 껐다 켠 상태가 뷰모드 전환마다 되살아났음).
+      applyEnabledGroups(["firs", "airways", "waypoints"]);
+      for (const name of ["tca", "navaids"]) map.removeLayer(groups[name]);
     },
     showBulk() {
-      for (const name of ["firs", "tca", "airways", "waypoints", "navaids"]) map.addLayer(groups[name]);
+      // 전부 체크박스 상태(enabledByName)를 존중한다(리뷰 지적, 2026-07-23 — 처음엔 TCA만
+      // 개별 방어했으나 firs/항공로/픽스/항행시설도 뷰모드 전환마다 무조건 addLayer돼
+      // 체크박스로 꺼둔 상태가 도로 켜지는 동일한 문제가 있었음).
+      applyEnabledGroups(["firs", "tca", "airways", "waypoints", "navaids"]);
       applyAirportZoomVisibility();
     },
+    setAirportsEnabled,
+    setGroupEnabled,
+    isGroupEnabled,
   };
 }

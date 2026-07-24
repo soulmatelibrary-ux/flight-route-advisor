@@ -2,6 +2,7 @@
   "_comment": "frontend/js/config.js의 DEFAULT_CONFIG 실제 값과 동기화된 예시(docs/06 §1.3 단일 진실원). frontend/config.json(git 미추적)으로 복사해 로컬에서 덮어쓸 값만 남겨도 된다 — 없으면 config.js의 DEFAULT_CONFIG가 그대로 적용된다.",
   "apiBaseUrl": "/api",
   "weatherProxyUrl": "http://localhost:3000/proxy",
+  "netTimeoutMs": 8000,
   "tileUrl": "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
   "map": {
     "center": [30, 127],
@@ -19,7 +20,8 @@
     "homeFirIcao": "RKRR",
     "homeWaypointCountry": "KS",
     "waypointRadius": { "home": 1.5, "foreign": 0.8 },
-    "minSampleForCongestionTag": 5
+    "minSampleForCongestionTag": 5,
+    "routeDiffThresholdNm": 20
   },
   "tokens": {
     "ink": "#22303c",
@@ -27,17 +29,48 @@
     "paper": "#fbfbf9",
     "orange": "#e8590c",
     "blue": "#1d5fae",
-    "green": "#2e8b57"
+    "green": "#2e8b57",
+    "hazardRed": "#c92a2a",
+    "routeDiffRed": "#e03131",
+    "aircraftYellow": "#f7c440",
+    "aircraftGround": "#aeb7bf",
+    "aircraftOutline": "#4a5560",
+    "aircraftHalo": "rgba(255,255,255,0.95)",
+    "shearWeak": "#2e7d32",
+    "shearModerate": "#e8590c",
+    "shearStrong": "#d62828",
+    "stcaCaution": "#f08c00",
+    "cpaPurple": "#8e24aa"
   },
   "adsb": {
     "pollMs": 12000,
-    "radiusNm": 250,
+    "radiusNm": 100,
     "endpoints": [
       "https://api.adsb.lol/v2/point/{lat}/{lon}/{radiusNm}",
       "https://opendata.adsb.fi/api/v2/point/{lat}/{lon}/{radiusNm}",
       "https://api.airplanes.live/v2/point/{lat}/{lon}/{radiusNm}"
     ],
-    "callsignLookupUrl": "https://api.adsbdb.com/v0/callsign/{callsign}"
+    "callsignLookupUrl": "https://api.adsbdb.com/v0/callsign/{callsign}",
+    "routeCodeLookupUrl": "https://api.adsb.lol/api/0/route/{callsign}",
+    "routeCodeBatchSize": 12,
+    "routeCodeBatchDelayMs": 250,
+    "routeSampleMaxPoints": 6,
+    "stca": {
+      "minAltFt": 18000,
+      "cautionNm": 10,
+      "cautionAltFt": 5000,
+      "warnNm": 5,
+      "warnAltFt": 2000,
+      "closingEpsilonNm": 0.05
+    },
+    "cpa": {
+      "lookaheadMin": 15,
+      "minLeadSec": 30,
+      "maxNm": 8,
+      "maxAltFt": 1000,
+      "minGsKt": 80,
+      "minClosingKt": 10
+    }
   },
   "weather": {
     "metarUrl": "https://aviationweather.gov/api/data/metar",
@@ -55,5 +88,25 @@
     "opacity": 0.6,
     "playIntervalMs": 500
   },
-  "externalApis": {}
+  "externalApis": {},
+  "wind": {
+    "apiUrl": "https://api.open-meteo.com/v1/gfs",
+    "levels": [
+      { "pressure": "700hPa", "fl": 100 },
+      { "pressure": "500hPa", "fl": 180 },
+      { "pressure": "400hPa", "fl": 240 },
+      { "pressure": "300hPa", "fl": 300 },
+      { "pressure": "250hPa", "fl": 340 },
+      { "pressure": "200hPa", "fl": 390 }
+    ],
+    "flOdd": [290, 310, 330, 350, 370, 390],
+    "flEven": [280, 300, 320, 340, 360, 380],
+    "flLow": [100, 180, 240],
+    "tasKt": 460,
+    "shearModerateKt1000ft": 4,
+    "shearStrongKt1000ft": 7,
+    "sampleMinPoints": 6,
+    "sampleMaxPoints": 16,
+    "sampleDegreesPerPoint": 3
+  }
 }

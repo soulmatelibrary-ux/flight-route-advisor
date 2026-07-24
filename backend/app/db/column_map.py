@@ -116,7 +116,63 @@ INGESTION_RUNS_COLUMNS: tuple[str, ...] = (
     "id", "run_type", "status", "finished_at", "validation_summary",
 )
 
+# --- reference_* 10종 (참조 데이터 정적 JSON→DB 전환, data-ingestion-backend
+# app/db/reference_tables.py가 스키마 단일 출처 — 물리명 기준 여기 그대로 옮김).
+# processed_*와 달리 run_id/최신-run 윈도잉이 없는 정적 마스터 데이터라 DATE_COLUMNS/
+# TABLE_RUN_TYPE에는 들어가지 않는다.
+REFERENCE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "reference_fir": ("id", "icao", "name_en", "polygons", "label_lat", "label_lon"),
+    "reference_tca": ("id", "name", "name_ko", "polygon"),
+    "reference_airway": ("id", "ident", "seq", "lat_a", "lon_a", "lat_b", "lon_b", "upper", "lower"),
+    "reference_airport": ("id", "icao", "name", "lat", "lon", "elev_ft", "type"),
+    "reference_navaid": ("id", "ident", "name", "type", "lat", "lon", "freq"),
+    "reference_waypoint": ("id", "ident", "lat", "lon", "country"),
+    "reference_sid": (
+        "id", "airport_icao", "sid_id", "route_type", "transition_id", "sequence_number",
+        "fix_id", "fix_icao_code", "path_and_termination", "recommended_navaid_id",
+        "center_fix_id", "cycle_date_year", "cycle_number",
+    ),
+    "reference_star": (
+        "id", "airport_icao", "star_id", "route_type", "transition_id", "sequence_number",
+        "fix_id", "fix_icao_code", "path_and_termination", "recommended_navaid_id",
+        "center_fix_id", "cycle_date_year", "cycle_number",
+    ),
+    "reference_waypoint_enroute": ("id", "waypoint_id", "icao_code", "fir_id", "name_descr", "lat", "lon"),
+    "reference_waypoint_terminal": ("id", "waypoint_id", "region_code", "fir_id", "name_descr", "lat", "lon"),
+}
+
+# --- advisor 소유 배치 아티팩트(odr2/flow, 파일→DB 통합) 12종. `backend/batch/
+# {build_odr2,build_flow}.py`가 별도 쓰기 role(advisor_artifact_writer)로 적재하고, 이
+# 화이트리스트는 조회 경로(queries/routes.py·flow_reasoning.py, advisor_readonly로 SELECT)가
+# 쓴다. 스키마 단일 출처: data-ingestion-backend alembic `d4f7a91c3e26_*`.
+ADVISOR_ODR2_COLUMNS: dict[str, tuple[str, ...]] = {
+    "advisor_odr2_od": ("dep", "arr", "total_flights", "data_period", "generated_at"),
+    "advisor_odr2_route": (
+        "dep", "arr", "rank", "flights", "avg_min", "delay_count", "heavy_count", "cruise_parity",
+    ),
+    "advisor_odr2_route_fir": ("dep", "arr", "rank", "seq", "fir_icao"),
+    "advisor_odr2_route_fix": ("dep", "arr", "rank", "seq", "fix_name"),
+    "advisor_odr2_track_point": ("dep", "arr", "rank", "seq", "lat", "lon"),
+    "advisor_odr2_full_route_point": ("dep", "arr", "rank", "seq", "lat", "lon"),
+}
+
+ADVISOR_FLOW_COLUMNS: dict[str, tuple[str, ...]] = {
+    "advisor_flow_od": (
+        "dep", "arr", "impact_pct", "affected_flights", "total_flights",
+        "on_time_affected", "on_time_normal", "delay_affected_min", "delay_normal_min",
+        "data_period", "generated_at",
+    ),
+    "advisor_flow_od_reason": ("dep", "arr", "seq", "reason_code", "pct"),
+    "advisor_flow_od_limit": ("dep", "arr", "seq", "limit_text"),
+    "advisor_flow_od_measure": ("dep", "arr", "seq", "measure_id"),
+    "advisor_flow_od_hour": ("dep", "arr", "hour", "impact_pct"),
+    "advisor_flow_route_group": ("dep", "arr", "route_key", "pct"),
+}
+
 TABLE_WHITELIST: dict[str, tuple[str, ...]] = {
     **PROCESSED_COLUMNS,
+    **REFERENCE_COLUMNS,
+    **ADVISOR_ODR2_COLUMNS,
+    **ADVISOR_FLOW_COLUMNS,
     "ingestion_runs": INGESTION_RUNS_COLUMNS,
 }

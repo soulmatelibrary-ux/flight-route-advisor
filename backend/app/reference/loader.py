@@ -1,32 +1,16 @@
-"""사전빌드 참조 JSON 로더 + bbox 필터 (docs/03-backend-api.md §3, docs/05 B5).
+"""참조 데이터 bbox 필터 + 도형 가공 (docs/03-backend-api.md §3, docs/05 B5).
 
-원천: `PORTING_PACKAGE_ROOT/사전빌드_JSON/*.json`(읽기 전용, docs/CLAUDE.md §0.1).
-이 파일들은 원본 `문서/08_임베드데이터_스키마.md`의 인덱스 배열이 아니라 이미 키 기반으로
-재파싱된 축약 키(`i`,`n`,`c` 등) 형태다 — 이 모듈이 문서화된 응답 키(§3 표)로 다시
-매핑한다. 정적 빌드 산출물이라 프로세스 생애주기 동안 메모리에 캐시하고(§7 "월·분기
-단위 갱신"), 재시작 없이 갱신하는 핫리로드는 MVP 범위 밖이다.
+원천: `reference_*` DB 테이블(정적 JSON→DB 전환, `app/queries/reference.py`가 조회 담당).
+이 모듈은 조회된 행을 문서화된 응답 키(§3 표)로 매핑하고 bbox 필터/도형 가공만 한다 —
+행 자체는 `app/queries/reference.py`가 프로세스 생애주기 동안 메모리에 캐시하므로(예전
+정적 JSON 캐시와 동일한 이유, §7 "월·분기 단위 갱신") 여기서는 별도로 캐시하지 않는다.
 """
 
 from __future__ import annotations
 
-import json
 import math
-from pathlib import Path
-from typing import Any
 
-from app.config import settings
-
-_REFERENCE_DIR = "사전빌드_JSON"
-
-_cache: dict[str, Any] = {}
-
-
-def _load_json(filename: str) -> Any:
-    if filename not in _cache:
-        path = settings.porting_package_root / _REFERENCE_DIR / filename
-        with path.open(encoding="utf-8") as f:
-            _cache[filename] = json.load(f)
-    return _cache[filename]
+from app.queries import reference as reference_queries
 
 
 def _parse_bbox(bbox: str | None) -> tuple[float, float, float, float] | None:
@@ -83,8 +67,8 @@ def _to_pairs(flat: list[float]) -> list[list[float]]:
 
 def load_firs(bbox: str | None = None, icao: str | None = None) -> list[dict]:
     """FIR 폴리곤 + 라벨점 (docs/03 §3: FR + LBL). icao가 있으면 bbox 무시하고 그 목록만."""
-    firs = _load_json("firs.json")
-    labels = {row[0]: (row[1], row[2]) for row in _load_json("firlbl.json")}
+    firs = reference_queries.fetch_firs()
+    labels = {row[0]: (row[1], row[2]) for row in reference_queries.fetch_fir_labels()}
 
     if icao:
         wanted = {code.strip().upper() for code in icao.split(",") if code.strip()}
@@ -115,7 +99,7 @@ def load_firs(bbox: str | None = None, icao: str | None = None) -> list[dict]:
 
 def load_tca(bbox: str | None = None) -> list[dict]:
     """접근관제구역 (docs/03 §3: TCA + TCALBL)."""
-    rows = _load_json("tca.json")
+    rows = reference_queries.fetch_tca()
     parsed_bbox = _parse_bbox(bbox)
     if parsed_bbox is not None:
         rows = [row for row in rows if _flat_coords_bbox_overlaps(row[2], parsed_bbox)]
@@ -123,38 +107,6 @@ def load_tca(bbox: str | None = None) -> list[dict]:
         {"name": name, "name_ko": name_ko, "polygon": _to_pairs(flat)}
         for name, name_ko, flat in rows
     ]
-
-
-def _load_airways_with_seq() -> list[dict]:
-    """전체 airways.json을 한 번만 seq 부여해 캐시한다.
-
-    seq는 같은 ident(항로명) 안에서 몇 번째 구간인지를 나타내는 절대 순번이어야 한다
-    (원본 AW 스키마의 `seqId`, docs/08). bbox로 걸러낸 부분집합 위에서 seq를 새로
-    매기면 같은 물리 구간이 요청마다 다른 seq를 받게 되는 버그가 생기므로(실측으로
-    발견, 2026-07-22), 반드시 필터링 전 전체 데이터에서 한 번만 계산한다.
-    """
-    if "airways_with_seq" not in _cache:
-        rows = _load_json("airways.json")
-        seq_by_ident: dict[str, int] = {}
-        result = []
-        for row in rows:
-            ident = row["n"]
-            seq = seq_by_ident.get(ident, 0)
-            seq_by_ident[ident] = seq + 1
-            lat1, lon1, lat2, lon2 = row["c"]
-            result.append(
-                {
-                    "ident": ident,
-                    "seq": seq,
-                    "a": [lat1, lon1],
-                    "b": [lat2, lon2],
-                    "upper": row["ul"],
-                    "lower": row["ll"],
-                    "_c": row["c"],
-                }
-            )
-        _cache["airways_with_seq"] = result
-    return _cache["airways_with_seq"]
 
 
 def load_airways(bbox: str | None = None) -> list[dict]:
@@ -169,7 +121,7 @@ def load_airways(bbox: str | None = None) -> list[dict]:
     양끝점 모두 요구하면 그런 세그먼트는 빠지고(경계선을 살짝 스치는 짧은 세그먼트만
     누락되는 정도), 실제로 그 영역 안에서 끝나는 세그먼트만 남는다.
     """
-    rows = _load_airways_with_seq()
+    rows = reference_queries.fetch_airways_with_seq()
     parsed_bbox = _parse_bbox(bbox)
     if parsed_bbox is not None:
         rows = [
@@ -178,7 +130,7 @@ def load_airways(bbox: str | None = None) -> list[dict]:
             if _point_in_bbox(row["a"][0], row["a"][1], parsed_bbox)
             and _point_in_bbox(row["b"][0], row["b"][1], parsed_bbox)
         ]
-    return [{k: v for k, v in row.items() if k != "_c"} for row in rows]
+    return rows
 
 
 _AIRPORT_CIVIL_PUBLIC_TYPES = ("A", "B")
@@ -191,7 +143,7 @@ def load_airports(
     icao가 있으면 bbox/type_filter 무시하고 그 목록만(load_firs와 동일 규약) — 특정 공항을
     타입 불문 단건 조회할 때 쓴다(예: 부트 시 A/B만 받은 목록에 없는 군용/기타 타입
     출도착 공항을 focus 모드에서 보강 조회, frontend/js/store.js selectOd 참고)."""
-    rows = _load_json("airports.json")
+    rows = reference_queries.fetch_airports()
     if icao:
         wanted_icaos = {code.strip().upper() for code in icao.split(",") if code.strip()}
         rows = [row for row in rows if row["i"] in wanted_icaos]
@@ -220,7 +172,7 @@ def load_airports(
 
 def load_navaids(bbox: str | None = None) -> list[dict]:
     """항행시설 (docs/03 §3: NV)."""
-    rows = _load_json("navaids.json")
+    rows = reference_queries.fetch_navaids()
     parsed_bbox = _parse_bbox(bbox)
     if parsed_bbox is not None:
         rows = [row for row in rows if _point_in_bbox(row["c"][0], row["c"][1], parsed_bbox)]
@@ -244,7 +196,7 @@ def load_waypoints(bbox: str | None = None, limit: int = WAYPOINTS_LIMIT_MAX) ->
     """항로 픽스 (docs/03 §3: WP). 상한 800(원본 문서/03 "픽스 z5+, 상한 800")."""
     if not (1 <= limit <= WAYPOINTS_LIMIT_MAX):
         raise ValueError(f"limit은 1~{WAYPOINTS_LIMIT_MAX} 범위여야 함")
-    rows = _load_json("waypoints.json")
+    rows = reference_queries.fetch_waypoints()
     parsed_bbox = _parse_bbox(bbox)
     if parsed_bbox is not None:
         rows = [row for row in rows if _point_in_bbox(row[1], row[2], parsed_bbox)]
@@ -256,14 +208,11 @@ def load_waypoints(bbox: str | None = None, limit: int = WAYPOINTS_LIMIT_MAX) ->
 
 
 def load_sidstar(airport: str | None = None) -> list[dict]:
-    """SID/STAR 절차 (docs/03 §3: SS, 한국만 — 원본 문서/08 §SS, SID 14·STAR 103).
+    """SID/STAR 절차 (docs/03 §3: SS, 한국만 — Jeppesen 항행DB 이관, 2026-07-23).
 
-    proc: 1=SID(파랑), 2=STAR(녹색). airport로 걸러야 의미 있는 규모라(공항 없이 전체
-    117건은 그대로 반환 — 개수가 작아 bbox 필터가 필요 없다) 별도 캐시 없이 매번 필터링.
+    proc: 1=SID(파랑), 2=STAR(녹색). 좌표 조립(fix_id→[lat,lon] 해석)은
+    `app/queries/reference.py`의 `fetch_sidstar`가 담당한다(터미널/엔루트 지점→navaid
+    우선순위 조인, 승인된 계획 "핵심 설계 결정 3" 참고) — 이 함수는 그 결과를 그대로
+    반환하는 얇은 래퍼다.
     """
-    rows = _load_json("sidstar.json")
-    return [
-        {"proc": proc, "name": name, "airport": row_airport, "coords": _to_pairs(coords)}
-        for proc, name, row_airport, coords in rows
-        if airport is None or row_airport == airport
-    ]
+    return reference_queries.fetch_sidstar(airport=airport)

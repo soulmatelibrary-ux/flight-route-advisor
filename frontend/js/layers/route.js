@@ -2,39 +2,108 @@
  * ROUTE 경로 지도 표시 (docs/03 §ROUTE 패널, F6). "전체"=모든 옵션 겹쳐보기(기본),
  * 옵션 선택 시 강조 + 경유 FIR 면(오렌지 10%, nonzero) + 출발/도착 배지.
  *
- * 명시적 단순화(docs/07-checklist.md Stage2 항목에 동기화): 최단 대비 "추가 구간만 빨강"
- * 세그먼트 diff, FIR 전환 화살표, ▶비행 애니메이션은 MVP DoD(경로추천 표시 자체)에는
- * 없는 부가 연출이라 이번 라운드에서는 생략 — 강조선(파랑, 굵게) + 정보 패널의 Δ소요(분)
- * 텍스트로 대체.
+ * 경로 1(최단, baseline) 대비 다른 옵션이 갈라지는 구간을 빨강으로 구분(사용자 요청,
+ * 2026-07-23 — 처음엔 "이번 라운드 생략" 부가 연출로 뒀던 세그먼트 diff를 이 요청으로
+ * 도입). 이름 붙은 픽스 체인은 인천FIR 구간만 있고(incheonTrackFixes) 전체 노선은
+ * 레이더 트랙 좌표뿐이라, 정확한 경로 일치 판정 대신 baseline 위 어떤 점과도
+ * routeDiffThresholdNm 이내인지로 근사한다(splitByBaseline).
+ *
+ * 명시적 단순화(docs/07-checklist.md Stage2 항목에 동기화): FIR 전환 화살표·▶비행
+ * 애니메이션은 여전히 MVP DoD 밖이라 생략 — 정보 패널의 Δ소요(분) 텍스트로 대체.
  */
 import { normalizeWinding, unwrapLongitudes, shiftRing } from "../geo.js";
 import { escapeHtml } from "../html.js";
 
 const L = window.L;
+const EARTH_RADIUS_NM = 3440.065;
+
+function haversineNm(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_NM * Math.asin(Math.sqrt(a));
+}
+
+function isNearBaseline(point, baselineCoords, thresholdNm) {
+  for (const [la, lo] of baselineCoords) {
+    if (haversineNm(point[0], point[1], la, lo) <= thresholdNm) return true;
+  }
+  return false;
+}
+
+// coords를 baseline 근접 여부가 바뀌는 지점마다 잘라 [{near, points}] 런으로 반환한다.
+// 경계점은 양쪽 구간에 공유시켜(current.push 후 다음 run의 시작으로도 재사용) 선이
+// 끊어져 보이지 않게 한다.
+function splitByBaseline(coords, baselineCoords, thresholdNm) {
+  const runs = [];
+  let currentNear = null;
+  let current = [];
+  for (const pt of coords) {
+    const near = isNearBaseline(pt, baselineCoords, thresholdNm);
+    if (currentNear === null) {
+      currentNear = near;
+      current = [pt];
+    } else if (near === currentNear) {
+      current.push(pt);
+    } else {
+      current.push(pt);
+      runs.push({ near: currentNear, points: current });
+      current = [pt];
+      currentNear = near;
+    }
+  }
+  if (current.length > 0) runs.push({ near: currentNear, points: current });
+  return runs;
+}
+
+// SID/STAR 전용 pane(사용자 제보, 2026-07-23) — 기본 pane 구성상 마커(markerPane,
+// zIndex 600)·상시 툴팁(tooltipPane, 650)이 벡터 레이어(overlayPane, 400)보다 항상 위에
+// 그려진다. 인천처럼 실시간 ADS-B 항공기가 밀집한 공항에서는 그 마커/라벨 더미가 바로
+// 밑에 깔린 SID/STAR 선을 완전히 가려 "안 보인다"는 제보로 이어졌다(Playwright로 실측 —
+// 선 자체는 정상 렌더링되고 있었음). 마커·상시 툴팁보다 더 높은 zIndex를 줘서 실시간
+// 항공기가 몰려 있어도 SID/STAR 선이 항상 보이게 한다.
+const SIDSTAR_PANE = "sidstarPane";
+const SIDSTAR_PANE_Z_INDEX = 660; // markerPane(600)·tooltipPane(650)보다 위
 
 export function createRouteLayers(map, CONFIG) {
   const group = L.layerGroup().addTo(map);
   const firHighlight = L.layerGroup().addTo(map);
+  if (!map.getPane(SIDSTAR_PANE)) {
+    map.createPane(SIDSTAR_PANE);
+    map.getPane(SIDSTAR_PANE).style.zIndex = SIDSTAR_PANE_Z_INDEX;
+  }
   // 우리나라 공항: 출발이면 SID(파랑), 도착이면 STAR(녹색) — 경로 선택 시 함께 표시
   // (사용자 요청, 2026-07-23; 원본 문서/08 §SS 색상 규약). main.js가 비동기로 채운다.
-  const sidstar = L.layerGroup().addTo(map);
+  // 레이어 컨트롤에서 SID·STAR를 독립적으로 켜고 끌 수 있어야 한다는 요청(2026-07-23,
+  // 참고 완성본의 레이어 목록 "SID 출발절차"/"STAR 도착절차" 분리와 동일)으로 레이어그룹을
+  // 둘로 나눔 — 완성본과 동일하게 기본은 꺼짐(map에 addTo하지 않음), main.js의 그룹형
+  // 레이어 컨트롤 체크박스가 켜질 때만 map.addLayer로 표시한다.
+  const sidGroup = L.layerGroup();
+  const starGroup = L.layerGroup();
 
   function clear() {
     group.clearLayers();
     firHighlight.clearLayers();
-    sidstar.clearLayers();
+    sidGroup.clearLayers();
+    starGroup.clearLayers();
   }
 
   function renderSidStar(rows) {
-    sidstar.clearLayers();
+    sidGroup.clearLayers();
+    starGroup.clearLayers();
     for (const proc of rows) {
-      const color = proc.proc === 1 ? CONFIG.tokens.blue : CONFIG.tokens.green;
-      L.polyline(proc.coords, { color, weight: 2, opacity: 0.85 })
+      const isSid = proc.proc === 1;
+      const color = isSid ? CONFIG.tokens.blue : CONFIG.tokens.green;
+      const target = isSid ? sidGroup : starGroup;
+      L.polyline(proc.coords, { color, weight: 2, opacity: 0.85, pane: SIDSTAR_PANE })
         .bindPopup(escapeHtml(proc.name))
-        .addTo(sidstar);
+        .addTo(target);
       const start = proc.coords[0];
       if (start) {
-        L.circleMarker(start, { radius: 3, color, weight: 1, fillColor: color, fillOpacity: 1 }).addTo(sidstar);
+        L.circleMarker(start, { radius: 3, color, weight: 1, fillColor: color, fillOpacity: 1, pane: SIDSTAR_PANE }).addTo(
+          target,
+        );
       }
     }
   }
@@ -62,12 +131,27 @@ export function createRouteLayers(map, CONFIG) {
     return unwrapLongitudes(coords);
   }
 
-  function drawOption(opt, emphasize, routeResult, airportByIcao) {
-    return L.polyline(coordsWithAirports(opt, routeResult, airportByIcao), {
-      color: emphasize ? CONFIG.tokens.blue : CONFIG.tokens.inkSoft,
-      weight: emphasize ? 4 : 2,
-      opacity: emphasize ? 0.95 : 0.45,
-    }).addTo(group);
+  // baselineCoords가 없으면(경로 1 자신) 항상 기존 단색 스타일. 있으면(경로 2+) baseline
+  // 근접 여부로 잘라, 겹치는 구간은 기존 스타일 그대로·갈라지는 구간만 routeDiffRed로 그린다.
+  function drawOption(opt, emphasize, routeResult, airportByIcao, baselineCoords) {
+    const coords = coordsWithAirports(opt, routeResult, airportByIcao);
+    if (!baselineCoords || baselineCoords.length === 0) {
+      L.polyline(coords, {
+        color: emphasize ? CONFIG.tokens.blue : CONFIG.tokens.inkSoft,
+        weight: emphasize ? 4 : 2,
+        opacity: emphasize ? 0.95 : 0.45,
+      }).addTo(group);
+      return;
+    }
+    const runs = splitByBaseline(coords, baselineCoords, CONFIG.display.routeDiffThresholdNm);
+    for (const run of runs) {
+      if (run.points.length < 2) continue;
+      L.polyline(run.points, {
+        color: run.near ? (emphasize ? CONFIG.tokens.blue : CONFIG.tokens.inkSoft) : CONFIG.tokens.routeDiffRed,
+        weight: emphasize ? 4 : 2,
+        opacity: run.near ? (emphasize ? 0.95 : 0.45) : 0.9,
+      }).addTo(group);
+    }
   }
 
   function highlightFirs(icaoList, firByIcao) {
@@ -118,12 +202,17 @@ export function createRouteLayers(map, CONFIG) {
     clear();
     if (!routeResult) return null;
     const options = routeResult.options;
+    // 경로 1(항상 baseline)은 그대로, 나머지는 경로 1 대비 갈라지는 구간만 빨강으로
+    // 구분(drawOption 참고) — idx===0에는 baselineCoords로 null을 넘겨 diff 대상에서 뺀다.
+    const baselineCoords = options.length > 1 ? coordsWithAirports(options[0], routeResult, airportByIcao) : null;
     if (selectedIndex === null || selectedIndex === undefined) {
-      for (const opt of options) drawOption(opt, false, routeResult, airportByIcao);
+      options.forEach((opt, idx) => drawOption(opt, false, routeResult, airportByIcao, idx === 0 ? null : baselineCoords));
       return null;
     }
     const selected = options[selectedIndex];
-    options.forEach((opt, idx) => drawOption(opt, idx === selectedIndex, routeResult, airportByIcao));
+    options.forEach((opt, idx) =>
+      drawOption(opt, idx === selectedIndex, routeResult, airportByIcao, idx === 0 ? null : baselineCoords),
+    );
     highlightFirs(selected.enrouteFirs, firByIcao);
     addEndpointBadges(selected, routeResult, airportByIcao);
     return L.latLngBounds(coordsWithAirports(selected, routeResult, airportByIcao));
@@ -140,5 +229,5 @@ export function createRouteLayers(map, CONFIG) {
     return L.latLngBounds(coordsWithAirports(selected, routeResult, airportByIcao));
   }
 
-  return { group, firHighlight, sidstar, render, clear, renderSidStar, boundsFor };
+  return { group, firHighlight, sidGroup, starGroup, render, clear, renderSidStar, boundsFor };
 }

@@ -6,15 +6,18 @@ import { getState, subscribe, bootMinimal } from "./store.js";
 import { escapeHtml } from "./html.js";
 import { createReferenceLayers } from "./layers/reference.js";
 import { createRouteLayers } from "./layers/route.js";
+import { createWindLayer } from "./layers/wind.js";
 import { createAdsbLayer } from "./layers/adsb.js";
 import { createHazardLayers } from "./layers/hazards.js";
 import { createRadarLayer } from "./layers/radar.js";
+import { createGroupedLayerControl } from "./layer-control.js";
 import { bindAirportWeatherButtons, getSigmets, getPireps } from "./weather.js";
 import { initRoutePanel } from "./route-panel.js";
 import { initFoisPanel } from "./fois-panel.js";
 import { initFlowManagementPanel } from "./flow-management-panel.js";
 import { initRouteFoisSummary } from "./route-fois-summary.js";
 import { initRouteOpsSummary } from "./route-ops-summary.js";
+import { initRouteFlowSummary } from "./route-flow-summary.js";
 import { initOpsPanel } from "./ops-panel.js";
 import { initViewModeToggle } from "./viewmode.js";
 import { initMinimap } from "./minimap.js";
@@ -94,12 +97,24 @@ async function main() {
       if (state.viewMode !== "focus" && state.bulk) applyBulkOverlayFilters(state);
     },
   });
-  for (const group of Object.values(referenceLayers.groups)) group.addTo(map);
+  // 참조 레이어(FIR/TCA/항공로/픽스/항행시설/공항)의 기본 표시 여부는 reference.js가
+  // 자체적으로 초기화한다(enabledByName/applyAirportZoomVisibility, 2026-07-23) — 여기서
+  // 별도로 addTo하지 않는다. 예전엔 이 파일이 전부 무조건 addTo했는데, 그러면 그룹형
+  // 레이어 컨트롤 체크박스로 뷰모드 전환 후에도 상태를 지키기 위한 단일 출처(reference.js)와
+  // 부팅 시점 상태가 두 곳에 나뉘어 어긋날 수 있었다(리뷰 지적).
   const routeLayers = createRouteLayers(map, CONFIG);
+  const windLayer = createWindLayer(map, CONFIG);
   const adsb = createAdsbLayer(map, CONFIG);
-  adsb.group.addTo(map);
+  // 실시간 항공기는 기본 꺼짐(참고 완성본 원본 주석 "실시간 항공기 — 기본 꺼짐"과 동일,
+  // 사용자 요청 2026-07-23) — adsb.start()는 폴링을 그대로 돌려 STCA/CPA 계산에 쓰지만
+  // 마커 표시 자체는 레이어 컨트롤에서 켤 때만.
   const hazards = createHazardLayers(CONFIG);
   const radar = createRadarLayer(map, CONFIG);
+  // 기상 레이더는 기본 켜짐(사용자 요청 2026-07-23) — SIGMET/PIREP과 달리 온디맨드 로드를
+  // 트리거하는 overlayadd를 수동으로 한 번 발생시켜야 최초 프레임이 즉시 뜬다(체크박스를
+  // 사용자가 직접 클릭한 것과 동일한 경로).
+  radar.group.addTo(map);
+  map.fire("overlayadd", { layer: radar.group, name: "기상 레이더(강수)" });
 
   // 위험기상(SIGMET/PIREP)은 기본 OFF·조건부 토글(docs/10 §2.5 ④) — 레이어 컨트롤에서
   // 켤 때만 조회한다(radar.js의 온디맨드 로드와 동일 원칙). SIGMET은 전세계 목록이라
@@ -137,18 +152,71 @@ async function main() {
     }
   });
 
-  L.control.layers(null, {
-    "전 세계 FIR": referenceLayers.groups.firs,
-    "접근관제구역(TCA)": referenceLayers.groups.tca,
-    항공로: referenceLayers.groups.airways,
-    "항로 픽스": referenceLayers.groups.waypoints,
-    항행시설: referenceLayers.groups.navaids,
-    "SID/STAR": routeLayers.sidstar,
-    "실시간 항공기": adsb.group,
-    "SIGMET(위험기상)": hazards.sigmetGroup,
-    PIREP: hazards.pirepGroup,
-    "기상 레이더": radar.group,
-  }, { position: "bottomright" }).addTo(map);
+  // 그룹형 레이어 컨트롤(사용자 요청 2026-07-23, 참고 완성본과 동일한 3섹션 구성) —
+  // Leaflet 기본 L.control.layers는 평면 목록만 지원해 섹션 구분이 안 되므로 커스텀
+  // 컨트롤(layer-control.js)로 교체. SUAS 특수공역(한국/세계)은 원본 데이터가 아직 DB
+  // 미적재라(사용자 확인, 2026-07-23) 이번 라운드는 보류 — Stage 0 적재 완료 후 "절차·공역"
+  // 섹션에 추가한다.
+  createGroupedLayerControl(map, [
+    {
+      title: "기본 항공정보",
+      // firs/tca/airways/waypoints/navaids는 item.layer(직접 map.addLayer/removeLayer)
+      // 대신 referenceLayers.setGroupEnabled를 거친다 — showFocus()/showBulk()(뷰모드
+      // 전환·경로 선택마다 호출)가 같은 enabledByName을 단일 출처로 참조하므로, 체크박스로
+      // 꺼둔 레이어가 뷰모드를 바꿔도 다시 켜지지 않는다(리뷰 지적, 2026-07-23 — 이전엔
+      // item.layer 방식이라 이 두 곳의 상태가 서로 몰랐음).
+      items: [
+        {
+          label: "전 세계 FIR",
+          checked: referenceLayers.isGroupEnabled("firs"),
+          onChange: (checked) => referenceLayers.setGroupEnabled("firs", checked),
+        },
+        {
+          label: "접근관제구역 TCA",
+          checked: referenceLayers.isGroupEnabled("tca"),
+          onChange: (checked) => referenceLayers.setGroupEnabled("tca", checked),
+        },
+        {
+          label: "항공로",
+          checked: referenceLayers.isGroupEnabled("airways"),
+          onChange: (checked) => referenceLayers.setGroupEnabled("airways", checked),
+        },
+        {
+          label: "항로 픽스",
+          checked: referenceLayers.isGroupEnabled("waypoints"),
+          onChange: (checked) => referenceLayers.setGroupEnabled("waypoints", checked),
+        },
+        // 공항은 줌 레벨에 따라 airportsLow/airportsAll을 자체 교체하는 별도 로직이라
+        // enabledByName이 아니라 전용 airportsEnabled 플래그를 쓴다(reference.js 참고).
+        { label: "공항", checked: true, onChange: (checked) => referenceLayers.setAirportsEnabled(checked) },
+        {
+          label: "항행시설 VOR/NDB",
+          checked: referenceLayers.isGroupEnabled("navaids"),
+          onChange: (checked) => referenceLayers.setGroupEnabled("navaids", checked),
+        },
+      ],
+    },
+    {
+      title: "절차·공역",
+      items: [
+        { label: "SID 출발절차(한국)", layer: routeLayers.sidGroup },
+        { label: "STAR 도착절차(한국)", layer: routeLayers.starGroup },
+      ],
+    },
+    {
+      title: "실시간·기상",
+      items: [
+        { label: "실시간 항공기 ADS-B", layer: adsb.group },
+        // STCA/CPA는 map.addLayer로 표현되는 실제 레이어가 아니라(마커 아이콘에 링을
+        // 얹고 연결선/패널을 갱신하는 계산형 오버레이) onChange만으로 처리.
+        { label: "근접 경고 (참고용 STCA)", checked: false, onChange: (checked) => adsb.setStcaEnabled(checked) },
+        { label: "동고도 조우 예측 (15분)", checked: false, onChange: (checked) => adsb.setCpaEnabled(checked) },
+        { label: "SIGMET(위험기상)", layer: hazards.sigmetGroup },
+        { label: "PIREP(조종사 기상 보고)", layer: hazards.pirepGroup },
+        { label: "기상 레이더(강수)", layer: radar.group },
+      ],
+    },
+  ]);
 
   bindAirportWeatherButtons(map);
   initRoutePanel();
@@ -156,6 +224,7 @@ async function main() {
   initFlowManagementPanel();
   initRouteFoisSummary();
   initRouteOpsSummary();
+  initRouteFlowSummary();
   initOpsPanel();
   initMinimap(map, CONFIG);
 
@@ -298,6 +367,11 @@ async function main() {
         if (homeFir) {
           const [minLat, minLon, maxLat, maxLon] = boundsOfPolygons(homeFir.polygons);
           map.fitBounds([[minLat, minLon], [maxLat, maxLon]], { padding: [40, 40] });
+          // 노선 미선택 결정포커스 기본 상태에서 인천FIR 실시간 항적을 계속 보여달라는
+          // 요청(2026-07-23) — 지도 중심(map.getCenter()) 기준 폴링은 사용자가 패닝하면
+          // 조용히 다른 지역으로 옮겨가 버리므로, 홈FIR 좌표를 별도 기준점으로 고정한다.
+          const center = homeFir.label ?? { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 };
+          adsb.setHomeCenter({ lat: center.lat, lon: center.lon });
         }
       } catch (err) {
         // 데이터는 이미 정상 로드됐으므로(이 블록은 boot:ok 시점) 여기서 실패해도
@@ -318,6 +392,9 @@ async function main() {
         const coords = opt.fullRouteCoords.length > 0 ? opt.fullRouteCoords : opt.trackCoords;
         adsb.setRouteCoords(coords);
         refreshSidStar(state.dep, state.arr);
+        // 상층풍·연직시어·추천고도(A3, docs/13) — 선택된 경로 하나에 대해서만 의미가
+        // 있어 "전체 겹쳐보기"(옵션 여럿, selectedOptionIndex===null)에서는 숨긴다.
+        windLayer.update(coords, opt.cruiseParity);
       } else {
         adsb.setRouteCoords(null);
         // 선택 해제 시에도 세대 토큰을 증가시켜야 한다 — 안 그러면 이미 늦게 도착한
@@ -325,6 +402,7 @@ async function main() {
         // 다시 채워 넣는다(리뷰 지적사항, 2026-07-23).
         sidStarSeq += 1;
         routeLayers.renderSidStar([]);
+        windLayer.clear();
       }
     }
     if (event.type === "viewmode:changed") {

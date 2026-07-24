@@ -29,6 +29,8 @@
 | `processed_fois_arrival` | 도착 비정상운항(동일 구조) | 도착 지연원인 분석 | `/api/fois/delays` |
 | `processed_flow_management` | 흐름관리(적용시각·대상 공항/FIR/항공로/지점·MINIT/MIT·고도속도제한·제한내용요약 등) | 흐름관리 조회(자체 전처리분) | `/api/flow-management` |
 
+> **2026-07-23 추가 — `reference_*` 10종도 이 서비스가 읽기 전용 소비한다.** 참조 지오메트리(FIR/TCA/항공로/공항/항행시설/픽스/SID/STAR)가 정적 JSON에서 DB로 전환되며, `processed_*`와 같은 PostgreSQL·같은 `advisor_readonly` role로 조회한다(스키마 단일 출처: `data-ingestion-backend/app/db/reference_tables.py`). 단, `processed_*`와 달리 **run_id/최신-run 윈도잉이 없는 정적 마스터 데이터**(§3 "최신본 뷰" 규약 미적용, 1회 적재 스크립트가 truncate-and-reload로만 갱신) — `backend/app/queries/reference.py` 참고.
+
 > **주의 — 통합데이터·영향상세 테이블은 존재하지 않는다.** 전처리 `DB스키마.md` 4.1에 따라 `processed_flight_route_integrated`(통합데이터 84,520×122)와 `processed_flow_management_impact_detail`(흐름관리 영향상세)은 **통합 스킬 부재로 1단계에서 제외**되었다. 따라서 흐름관리의 "비행편 영향" 결합 기능(원본 `문서/03` 흐름관리 탭)은 이 테이블들이 생기기 전까지 구현하지 않는다([05-mvp-scope](./05-mvp-scope.md) 3단계).
 
 ## 3. append-only 대응 — "최신본 뷰" 질의 규약
@@ -109,7 +111,9 @@ SELECT * FROM ranked WHERE rn = 1;
 | **materialized view** | `processed_flight_data` 최신본 위에 OD 집계 MV. 좌표해석까지 SQL로는 무리 → 집계까지만 MV, 좌표해석은 앱단 | DB 표준, 갱신은 REFRESH. 좌표해석 로직을 SQL로 옮기기 어려움 |
 | **배치 집계 테이블/아티팩트 (권장)** | 새 run 적재 후 배치가 `3_agg_csv`/`4_build_routes2` 로직(파이썬)을 DB 입력으로 재실행해 `odr2` JSON 아티팩트(또는 별도 집계 테이블) 생성 → API가 그대로 서빙 | 기존 파이썬 로직 재사용, 좌표해석 그대로. 배치 트리거 필요 |
 
-> **읽기 전용 원칙과의 정합**: 집계 결과를 전처리 DB에 쓰지 않는다. 이 서비스 소유의 산출물(집계 테이블은 이 서비스 전용 스키마/DB, 또는 파일 아티팩트)로 둔다. 배치 트리거는 **Stage 0의 새 SUCCESS run(단, `run_type='flight_data'`에 한정 — acdm/fois/flow_management run은 ODR2를 바꾸지 않음) 이후 로컬 pgsql `processed_flight_data`에서 집계**하는 것을 기준으로 한다(초기: 수동/CLI 실행, 이후: 폴링 또는 Stage 0 완료 훅으로 자동화 — [08](./08-setup-and-dev-order.md)).
+> **읽기 전용 원칙과의 정합**: 집계 결과를 전처리 DB(`processed_*`)에 쓰지 않는다. 배치 트리거는 **Stage 0의 새 SUCCESS run(단, `run_type='flight_data'`에 한정 — acdm/fois/flow_management run은 ODR2를 바꾸지 않음) 이후 로컬 pgsql `processed_flight_data`에서 집계**하는 것을 기준으로 한다(초기: 수동/CLI 실행, 이후: 폴링 또는 Stage 0 완료 훅으로 자동화 — [08](./08-setup-and-dev-order.md)).
+>
+> **2026-07-23 갱신 — 산출물 저장소를 파일 아티팩트에서 DB로 전환**: ODR2(`batch/build_odr2.py`)·흐름관리 영향률(`batch/build_flow.py`, §STEP A1) 둘 다 처음엔 "이 서비스 소유의 파일 아티팩트"(`app/reference/artifacts/{odr2,flow}.json`)로 시작했으나, 로컬 Docker DB를 실제로 쓰고 있는 상황에 맞춰 **완전 정규화된 신규 테이블**(`advisor_odr2_*` 6종·`advisor_flow_*` 6종, 스키마 단일 출처: data-ingestion-backend alembic `d4f7a91c3e26_*`)로 옮겼다. 최소권한 원칙은 그대로 지킨다 — 이 배치 전용 쓰기 role `advisor_artifact_writer`는 이 12개 테이블에만 권한이 있고 `processed_*`/`raw_*`/`reference_*`는 접근 불가(§6). 조회 측(`queries/routes.py`·`queries/flow_reasoning.py`)은 기존 `advisor_readonly` role로 SELECT만 한다. 갱신 방식은 `reference_*`(§2 각주)와 동일한 truncate-and-reload — 매 실행이 전체 재계산이라 증분이 아니라 통째로 교체하고, 하나의 트랜잭션으로 묶어 조회 측이 교체 중간 상태를 보지 않게 한다.
 
 ## 5. 컬럼 어댑터 (물리 컬럼명 — 확정본 반영)
 
@@ -136,6 +140,7 @@ SELECT * FROM ranked WHERE rn = 1;
 | 항목 | 로컬 Docker | Supabase |
 |---|---|---|
 | `ADVISOR_DATABASE_URL` | `postgresql://advisor_readonly:***@db:5432/aviation` | `postgresql://advisor_readonly:***@<proj>.supabase.co:5432/postgres` |
+| `ADVISOR_ARTIFACT_DATABASE_URL`(odr2/flow 배치 전용 쓰기) | `postgresql://advisor_artifact_writer:***@db:5432/aviation` | `postgresql://advisor_artifact_writer:***@<proj>.supabase.co:5432/postgres` |
 | SSL | 불필요 | `sslmode=require` |
 | 연결 종류 | direct | 조회 트래픽은 **pooler(pgbouncer)** 권장, 단 prepared statement 제약 유의 |
 | 커넥션 풀 | 여유 | 저가 티어 동시 커넥션 한도 → SQLAlchemy pool 크기 작게 |
@@ -161,6 +166,16 @@ SELECT * FROM ranked WHERE rn = 1;
   -- raw_*, ingestion_logs 등에는 GRANT 하지 않는다.
   ```
   실측 확인(2026-07-22): `advisor_readonly`로 `raw_files` SELECT는 permission denied, `ingestion_runs`의 GRANT 밖 컬럼(`workspace_path` 등) SELECT도 permission denied. `backend/app/db/tables.py`는 SQLAlchemy 리플렉션이 `pg_catalog`를 직접 읽어 GRANT와 무관하게 전체 컬럼명을 반환하는 특성이 있어(실측 확인), `include_columns`로 화이트리스트만 리플렉션하도록 앱 레벨에서 한 번 더 제한한다.
+- **odr2/flow 배치 전용 쓰기 GRANT (2026-07-23 신규)**: role명 `advisor_artifact_writer`(data-ingestion-backend alembic `d4f7a91c3e26_*`). `advisor_odr2_*`(6종)·`advisor_flow_*`(6종) 12개 테이블에만 SELECT/INSERT/UPDATE/DELETE/TRUNCATE. `processed_*`/`raw_*`/`reference_*`/`ingestion_*`에는 GRANT 없음 — `advisor_readonly`와 마찬가지로 최소권한, 그리고 `advisor_readonly`와도 분리된 별도 role이라 조회 경로가 실수로 쓰기 권한을 갖는 일이 없다. 같은 12개 테이블에 `advisor_readonly`도 SELECT만 추가로 받아 `queries/routes.py`·`queries/flow_reasoning.py`가 조회한다.
+  ```sql
+  -- d4f7a91c3e26_advisor_artifact_tables_odr2_flow.py
+  CREATE ROLE advisor_artifact_writer LOGIN PASSWORD :pw;
+  GRANT USAGE ON SCHEMA public TO advisor_artifact_writer;
+  GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON advisor_odr2_od, advisor_odr2_route, ...
+    TO advisor_artifact_writer;
+  GRANT SELECT ON advisor_odr2_od, advisor_odr2_route, ... TO advisor_readonly;
+  ```
+  이 배치(`backend/batch/{build_odr2,build_flow}.py`)만 `ADVISOR_ARTIFACT_DATABASE_URL`(신규 env)로 접속하는 별도 엔진(`backend/app/db/artifact_session.py`)을 쓴다 — API 프로세스(`main.py` 이하)는 이 값을 참조하지 않으므로 미설정이어도 읽기전용 API 서버는 그대로 기동한다.
 
 ## 7. 데이터 신선도·정합성
 

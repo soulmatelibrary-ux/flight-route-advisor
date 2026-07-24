@@ -26,7 +26,7 @@ export function createFallbackFetcher() {
     let lastErr;
     for (const [name, url] of buildAttempts(directUrl)) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: AbortSignal.timeout(getConfig().netTimeoutMs) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         successPath = name;

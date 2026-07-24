@@ -10,7 +10,7 @@
 ## 1. 설계 원칙
 
 1. **읽기 전용.** 모든 엔드포인트는 GET. 쓰기 없음.
-2. **데이터 출처 이원화.** 참조 지오메트리(정적 아티팩트/캐시)와 운항·분석(DB `processed_*`)을 경로 네임스페이스로 구분한다: `/api/reference/*` vs 나머지.
+2. **데이터 출처 이원화.** 참조 지오메트리(DB `reference_*`, 장기 캐시)와 운항·분석(DB `processed_*`)을 경로 네임스페이스로 구분한다: `/api/reference/*` vs 나머지. 2026-07-23 이전에는 참조 데이터가 정적 JSON 파일이었으나(§3 이전 버전), 전부 `reference_*` DB 테이블로 이관됐다 — 여전히 논리적으로는 "정적/장기 캐시 데이터"라 캐시 정책·응답 봉투 규약(§2, §5)은 그대로다.
 3. **키 기반 JSON.** 응답은 객체 키로 내보내 프론트가 배열 인덱스·물리 컬럼명에 의존하지 않게 한다([06-conventions](./06-conventions.md)). 원본 임베드 스키마(`08`)의 배열 형태는 프론트 어댑터에서만 다룬다.
 4. **최신본 규약.** 운항 데이터는 최신 SUCCESS run 기준([02](./02-db-integration.md) §3). 응답 메타에 출처 run·데이터 기간·검증 경고를 포함.
 5. **캐시 정책.** 참조 데이터는 장기 캐시(`Cache-Control: public, max-age`), 운항 데이터는 짧은 캐시 또는 no-store.
@@ -22,7 +22,7 @@
 {
   "data": { /* 또는 [ ... ] */ },
   "meta": {
-    "source": "reference-static | processed_flight_data | ...",
+    "source": "reference-db | processed_flight_data | ...",
     "run_id": "uuid | null",
     "data_period": "20260101-20260131 | null",
     "warnings": [ "ACDM 검토필요 139건 제외" ]
@@ -33,9 +33,9 @@
 - 경로추천(ODR2, §4.1)은 `data_period`(배치가 실제로 집계한 날짜 범위, `batch/build_odr2.py`가 `odr2_meta.json`에 기록)를 채운다. `run_id`는 null로 둔다 — "일자별 최신 run 우선"(§3.2) 특성상 날짜별로 승자 run이 다를 수 있어 단일 run_id로 환원할 수 없기 때문.
 - 에러 응답은 표준 봉투 `{"error": {"code": "BAD_REQUEST|NOT_FOUND|VALIDATION_ERROR|RATE_LIMITED|SERVICE_UNAVAILABLE|INTERNAL_ERROR", "message": "..."}}` 하나로 통일한다(`app/envelope.py:error_envelope`, `main.py`의 `HTTPException`/`RequestValidationError`/`Exception` 핸들러와 `middleware.py`의 429가 전부 이 함수를 거친다). 라우터가 FastAPI 기본값(`{"detail": ...}`)을 그대로 흘려보내지 않도록 개별 라우터가 아니라 앱 전역에서 재포장한다.
 
-## 3. 참조 데이터 엔드포인트 (정적 아티팩트 · 장기 캐시)
+## 3. 참조 데이터 엔드포인트 (`reference_*` DB · 장기 캐시)
 
-원천: `비행경로추천서비스_이식패키지/사전빌드_JSON`(또는 재파싱본). DB 미경유.
+원천(2026-07-23 DB 전환): FIR/TCA/항공로/공항/항행시설/픽스 6종은 `비행경로추천서비스_이식패키지/사전빌드_JSON`을 `data-ingestion-backend/scripts/migrate_static_reference_to_db.py`로 1회 이관한 `reference_*` 테이블. `sidstar`는 Jeppesen(ARINC 424 계열) 항행DB 원본 CSV 4종을 `data-ingestion-backend/scripts/ingest_jepp_nav.py`로 적재한 `reference_sid`/`reference_star`/`reference_waypoint_enroute`/`reference_waypoint_terminal`에서 fix_id→좌표 해석(터미널→엔루트→navaid 우선순위 조인, `backend/app/queries/reference.py:_resolve_fix`)으로 조립한다. `processed_*`(운항 데이터)와 달리 run_id/최신-run 윈도잉이 없는 정적 마스터 데이터.
 
 | 엔드포인트 | 반환 | 원본 스키마(08) | 필터 |
 |---|---|---|---|
@@ -47,7 +47,7 @@
 | `GET /api/reference/tca` | 접근관제구역 | TCA + TCALBL | `bbox` |
 | `GET /api/reference/acc-sectors` | ACC 관제섹터 | ACCS `{acc:{IN,DG}, sectors:[...]}` | — |
 | `GET /api/reference/firko` | FIR 한국어명 | FIRKO `{ICAO:한글명}` | — |
-| `GET /api/reference/sidstar` | SID/STAR(한국만, SID 14·STAR 103) | SS `[proc,name,airport,coords]` | `airport`(없으면 전체 117건) |
+| `GET /api/reference/sidstar` | SID/STAR(한국만, Jeppesen 항행DB 이관) | `{proc,name,airport,coords}` (좌표는 fix 해석으로 조립, 원본 CSV엔 좌표 없음) | `airport`(없으면 전체 반환) |
 | `GET /api/reference/suas` | (2단계) 특수사용공역 | SU/SUW | `bbox`,`scope` |
 
 - `bbox=minLat,minLon,maxLat,maxLon`, `zoom=<int>` — 서버가 줌별 표시 규칙(원본 `03`)을 적용해 반환량을 줄인다.
@@ -55,7 +55,7 @@
 
 > **구현 범위(2026-07-22)**: MVP DoD([05](./05-mvp-scope.md) §2.4 "참조 지도 6종")에 필요한 firs·tca·airways·airports·navaids·waypoints만 우선 구현했다.
 > - `acc-sectors`·`suas`는 FIR 분석 패널·2단계 기능 전용이라 이번 라운드 대상이 아니다.
-> - **`sidstar`는 2026-07-23 사용자 요청으로 추가 구현**(원래 2단계 예정이었으나 범위 변경): `proc`(1=SID,2=STAR) 그대로 반환, bbox 없이 `airport` 단일 필터만(전체 117건이라 bbox 불필요). 프론트는 경로 선택 시 출발 공항의 SID·도착 공항의 STAR만 걸러 표시([04](./04-frontend-migration.md), `layers/route.js` `renderSidStar`).
+> - **`sidstar`는 2026-07-23 사용자 요청으로 추가 구현**(원래 2단계 예정이었으나 범위 변경), 같은 날 **Jeppesen 항행DB CSV 이관으로 데이터 갭 해소**: 기존 사전빌드 `sidstar.json`(SID 14·STAR 103, 한국 17개 공항 부분 커버, 인천 SID·김포 전체 결측)은 이식 패키지 자체의 데이터 한계였다 — Jeppesen 원본 CSV 4종(SID/STAR/엔루트·터미널 지점) 적재로 인천·김포 포함 전 공항 SID+STAR 온전히 커버. `proc`(1=SID,2=STAR) 그대로 반환, bbox 없이 `airport` 단일 필터만. 프론트는 경로 선택 시 출발 공항의 SID·도착 공항의 STAR만 걸러 표시([04](./04-frontend-migration.md), `layers/route.js` `renderSidStar`) — 이 프론트 동작 자체는 무변경.
 > - `firko`는 **소스 자체가 없다**: `사전빌드_JSON/`에 `firko.json`이 존재하지 않고(원본 HTML에만 내장돼 있을 가능성), 임의로 한글 FIR명을 만들어 넣지 않는다(허위 정보 생성 금지 원칙). 필요해지면 원본 HTML에서 `FIRKO` const 블록만 스크립트로 추출(전체 Read 금지, §6)해 아티팩트로 남길 것.
 > - `zoom`은 파라미터로는 받되(airways/airports/navaids/waypoints), 원본 `문서/03`이 airports "저배율은 민간/공용만" 외에는 구체적 수치 임계값을 규정하지 않아 실제 씨닝 로직은 아직 붙이지 않았다 — 프론트(F5/F9) 연동 시 실사용 줌 레벨을 보고 확정.
 > - **확정(2026-07-22, Stage 2 F5/F9 연동)**: 공항 저배율(민간/공용만) 임계는 `frontend/js/config.js`의 `display.airportFullTypeZoom=5`로 **프론트 클라이언트 측**에서 적용한다(전세계/지역 컨텍스트 모드에서 공항 전량을 한 번 받아 zoom에 따라 표시 그룹만 토글 — 서버 재요청 없음). 서버 쿼리 파라미터 `zoom`은 이번 라운드에서도 씨닝을 적용하지 않은 채로 남겨둔다(요청 파라미터 자체는 받아 검증만 하고 무시) — 항공로/픽스/항행시설의 줌별 반환량 축소(타일화)는 [05-mvp-scope](./05-mvp-scope.md) §3 2단계("참조 지오메트리 타일화")로 이관.
