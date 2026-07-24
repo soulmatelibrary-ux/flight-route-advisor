@@ -200,10 +200,15 @@ export function createSectorPanel(CONFIG) {
     renderRows(sectors, demand);
   }
 
-  /** adsb.js의 onSnapshot 콜백 — 매 폴링 사이클(성공 시 배열, 실패 시 null)마다 호출. */
+  /** adsb.js의 onSnapshot 콜백 — 매 폴링 사이클(성공 시 배열, 실패 시 null)마다 호출.
+   * recompute()의 프로미스를 그대로 반환한다(리뷰 지적, 2026-07-24) — main.js가 이 호출
+   * 직후 동기적으로 bottlenecksPanel.refreshSectorSignal()을 불러 getDemand()를 읽는데,
+   * 예전엔 여기서 fire-and-forget으로 두어(await 없이 recompute() 호출) refreshSectorSignal이
+   * recompute()가 lastDemand를 갱신하기 *전* 값을 읽어 병목 패널의 섹터 신호가 매번 한
+   * 폴링 주기만큼 뒤처졌다. */
   function onAircraftUpdate(aircraft) {
     lastAircraft = aircraft;
-    recompute();
+    return recompute();
   }
 
   /** 세그먼트 병목 종합(A5)이 읽는 요약 — 현재 선택된 경로가 지나는 섹터로만 필터링된

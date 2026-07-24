@@ -115,8 +115,12 @@ async function main() {
   // windLayer/sectorPanel의 update()가 끝난 뒤에만 호출해야 그 둘의 getRecommendation()/
   // getDemand()가 최신 값을 반환한다(아래 option:selected 핸들러에서 Promise.all로 순서 보장).
   const bottlenecksPanel = createBottlenecksPanel(CONFIG, windLayer, sectorPanel);
-  adsb.onSnapshot((aircraft) => {
-    sectorPanel.onAircraftUpdate(aircraft);
+  adsb.onSnapshot(async (aircraft) => {
+    // sectorPanel의 recompute()가 lastDemand를 다 갱신한 뒤에 읽어야 한다 — await 없이
+    // 곧장 refreshSectorSignal을 부르면 매번 한 폴링 주기(12초)만큼 뒤처진 값을 읽는
+    // 버그가 있었다(리뷰 지적, 2026-07-24. onAircraftUpdate가 recompute()의 프로미스를
+    // 반환하도록 analyze-sectors.js도 함께 수정).
+    await sectorPanel.onAircraftUpdate(aircraft);
     // 섹터 패널 자체는 매 폴링(12초)마다 실시간 갱신되는데 A5 패널은 선택 시점에 한 번만
     // 그려서 그 사이 정체 신호가 새로 생겨도 반영이 안 됐다(리뷰 지적, 2026-07-24) — A1(흐름
     // 관리)은 재조회하지 않고 A4(섹터 교통) 표시만 최신화(refreshSectorSignal 내부에서 현재

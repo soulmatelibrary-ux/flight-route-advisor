@@ -198,7 +198,7 @@ sa.Index("ix_reference_acc_boundary_acc", reference_acc_boundary.c.acc)
 # SUAS/MOA(특수공역) — `사전빌드_JSON/{suas,suas_world}.json`(완성본 빌드 파이프라인이 DAFIF
 # 원본(SUAS_PAR.TXT/SUAS.TXT, 세그먼트+SHAP 코드 6종)을 이미 폴리곤으로 풀어놓은 산출물, 원시
 # DAFIF 지오메트리를 이 앱이 다시 파싱하지 않는다)을 이관. 두 파일은 ident 기준 완전히
-# 겹치지 않는 별도 데이터(한국 240건 vs 세계 18,104건)라 `region`으로 태깅해 한 테이블에 합친다.
+# 겹치지 않는 별도 데이터(한국 240건 vs 세계 18,186건, 실측 확인)라 `region`으로 태깅해 한 테이블에 합친다.
 # EFF_TIMES(발효시간) 컬럼은 이 폴리곤 산출물에 없다 — docs/13-ai-reasoning-dev-plan.md STEP A7
 # (AI 근거화, 별도 게이트) 소관이라 이번 이관 범위에서 제외.
 reference_suas = sa.Table(

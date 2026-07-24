@@ -18,6 +18,13 @@
  * 임의로 만들지 않는다. A4(섹터 교통)만 유일하게 실제 FIR(RKRR, 유일하게 섹터 데이터가
  * 있는 FIR)에 귀속 가능하다.
  *
+ * **A6(터미널 신호 — 진출입 게이트·출발 활주로 분포)은 의도적으로 여기 포함하지 않는다**
+ * (통합 리뷰 지적, 2026-07-24 — 문서에 명시가 안 돼 있어 남겨둠): A6는 "이 경로가 어떤
+ * 게이트·활주로를 쓰는가"라는 경로 자체의 속성이라 이미 `route-panel.js`가 경로 카드에
+ * 항상 표시하고, 병목 여부를 판정할 등급/임계값도 없다(그냥 사실 정보). 반면 이 파일이
+ * 모으는 신호(A1/A3/A4/A7)는 전부 "정체·위험 가능성"을 등급화한 것 — 성격이 달라 같은
+ * 배열에 섞으면 오히려 "왜 게이트 정보가 병목 목록에 있지"라는 혼란만 생긴다.
+ *
  * **A7(SUAS/MOA 통과시각 발효 판정, docs/13 STEP A7, 신규 파생 — 완성본에도 없던 신호)**:
  * 경로가 지나는 SUAS/MOA 폴리곤 + 통과 예상시각(A3와 동일한 근사 — 순항 TAS 고정, 누적거리
  * 기반)으로 발효 여부를 판정해 `kind:"airspace"` 항목을 추가한다. 발효시간이 구조화 파싱된
@@ -282,6 +289,11 @@ export function createBottlenecksPanel(CONFIG, windLayer, sectorPanel) {
     lastArr = arr;
     lastFlowImpact = null;
     lastFlowError = null;
+    // lastSuasItems도 다른 캐시와 동일하게 await 전에 동기적으로 비운다(리뷰 지적,
+    // 2026-07-24) — 안 비우면 이 await가 끝나기 전 도착하는 ADS-B 스냅샷(refreshSectorSignal)이
+    // lastDep/lastArr는 이미 새 노선을 가리키는데 lastSuasItems만 이전 노선 것을 그대로 써서,
+    // 병목 패널에 엉뚱한 노선의 SUAS 경고가 잠깐 섞여 나올 수 있었다.
+    lastSuasItems = [];
     const [flowOutcome, suasList] = await Promise.all([
       api.routeFlow(dep, arr).then(
         (res) => ({ ok: true, data: res.data }),

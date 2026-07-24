@@ -159,8 +159,9 @@ def get_suas(
     bbox: str | None = Query(default=None, description="minLat,minLon,maxLat,maxLon"),
     region: str | None = Query(default=None, description="kr(한국)|world(세계), 생략 시 전체"),
 ):
-    """SUAS/MOA 특수공역(docs/03 §3 신규, 2026-07-24). EFF_TIMES(발효시간)는 docs/13 STEP A7
-    소관이라 이 응답엔 없음."""
+    """SUAS/MOA 특수공역(docs/03 §3 신규, 2026-07-24). 발효시간(`eff_times_raw`/`schedule_status`/
+    `schedule_segments`)은 `loader.load_suas()`가 STEP A7 배치(`advisor_suas_schedule`)와
+    `ident` 조인으로 덧붙인다 — 그 배치가 아직 안 돌았으면 전부 `null`."""
     try:
         data = loader.load_suas(bbox=bbox, region=region)
     except _DB_ERRORS as exc:
